@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notes Viewer</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <div class="empty-state" id="emptyState">
+    <div style="font-size:2rem">📑</div>
+    <div style="font-size:1.15rem;font-weight:600">No presentation loaded</div>
+    <div style="color:#666;max-width:360px;line-height:1.45">
+      Open a file from the home page, or use <strong>Open</strong> below.
+    </div>
+    <p><a href="index.html">← Back to home</a></p>
+  </div>
+
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" title="Scroll sideways to resize · drag the edge">
+      <div class="sidebar-head" id="deckTitle">Notes Viewer</div>
+      <div class="thumbs" id="thumbs"></div>
+    </aside>
+    <div class="v-splitter" id="vSplitter" title="Drag to resize slide panel"></div>
+    <section class="main" id="main">
+      <div class="slide-pane" id="slidePane" title="Scroll to change slides">
+        <div class="slide-chrome" id="slideChrome"></div>
+        <div class="slide-wrap">
+          <img id="mainSlide" alt="Current slide" src="" draggable="false">
+        </div>
+      </div>
+      <div class="splitter" id="splitter" title="Drag to resize notes pane"></div>
+      <div class="notes-pane" id="notesPane">
+        <div class="notes-bar" id="notesBar">
+          <div class="left">
+            <span class="save-status" id="saveStatus">saved</span>
+            <div class="spacing-ctl tools-extra" title="Line spacing">
+              <button type="button" id="btnSpaceDown" aria-label="Tighter spacing">▲</button>
+              <button type="button" id="btnSpaceUp" aria-label="Looser spacing">▼</button>
+            </div>
+          </div>
+          <div class="fmt tools-extra" id="fmtBar">
+            <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+            <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+            <button type="button" id="btnResetNotes" title="Restore original notes">Reset</button>
+          </div>
+          <div class="view-toggles">
+            <button type="button" id="btnTogglePicture" title="Hide or show main slide">Hide picture</button>
+            <button type="button" id="btnToggleTools" title="Hide or show formatting tools">Hide tools</button>
+            <button type="button" id="btnHome" title="Home page">Home</button>
+          </div>
+          <div class="nav">
+            <button type="button" id="btnPrev" title="Previous">◀</button>
+            <span id="pageCurrent" style="font-size:12px;color:#666;min-width:1.2em;text-align:center"></span>
+            <button type="button" id="btnOpen" title="Open a PowerPoint in a new tab">Open</button>
+            <span id="pageTotal" style="font-size:12px;color:#666;min-width:1.2em;text-align:center"></span>
+            <button type="button" id="btnNext" title="Next">▶</button>
+            <input type="file" id="openFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden>
+          </div>
+        </div>
+        <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"
+             role="textbox" aria-multiline="true" aria-label="Speaker notes"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="jszip.min.js"></script>
+  <script src="pptx-loader.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
