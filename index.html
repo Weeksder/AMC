@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a1d23">
+  <meta name="format-detection" content="telephone=no">
   <title>PPTX Notes Viewer</title>
   <style>
     :root {
@@ -13,22 +18,25 @@
       --muted: #9aa3b2;
       --accent: #e36c0a;
       --accent-hover: #f07d1c;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
       margin: 0;
       min-height: 100%;
-      font-family: "Segoe UI", Calibri, system-ui, sans-serif;
+      min-height: 100dvh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       background: radial-gradient(1200px 600px at 20% -10%, #2a3140 0%, var(--bg) 55%);
       color: var(--text);
     }
     .wrap {
       max-width: 560px;
       margin: 0 auto;
-      padding: 48px 20px 64px;
+      padding: calc(32px + var(--safe-top)) 20px calc(48px + var(--safe-bottom));
     }
     h1 {
-      font-size: 1.75rem;
+      font-size: 1.7rem;
       font-weight: 650;
       margin: 0 0 8px;
       letter-spacing: -0.02em;
@@ -37,54 +45,57 @@
       color: var(--muted);
       font-size: 0.98rem;
       line-height: 1.45;
-      margin: 0 0 28px;
+      margin: 0 0 24px;
     }
     .drop {
       border: 2px dashed var(--border);
-      border-radius: 14px;
+      border-radius: 16px;
       background: var(--card);
-      padding: 40px 24px;
+      padding: 36px 20px;
       text-align: center;
-      transition: border-color .15s, background .15s, transform .15s;
+      transition: border-color .15s, background .15s;
       cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none;
     }
-    .drop:hover, .drop.dragover {
+    .drop:hover, .drop.dragover, .drop:focus-visible {
       border-color: var(--accent);
       background: #2c3340;
+      outline: none;
     }
-    .drop.dragover { transform: scale(1.01); }
-    .drop .icon {
-      font-size: 2.2rem;
-      margin-bottom: 10px;
-      opacity: 0.9;
-    }
+    .drop .icon { font-size: 2.2rem; margin-bottom: 10px; }
     .drop strong { display: block; font-size: 1.05rem; margin-bottom: 6px; }
-    .drop span { color: var(--muted); font-size: 0.9rem; }
+    .drop span { color: var(--muted); font-size: 0.9rem; display: block; line-height: 1.4; }
     .actions {
       display: flex;
       gap: 10px;
       justify-content: center;
-      margin-top: 18px;
+      margin-top: 20px;
       flex-wrap: wrap;
     }
-    button, .btn {
+    button {
       appearance: none;
+      -webkit-appearance: none;
       border: none;
-      border-radius: 8px;
-      padding: 10px 18px;
-      font-size: 0.95rem;
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
       font-family: inherit;
+      min-height: 48px; /* Apple touch target */
+      touch-action: manipulation;
     }
     .btn-primary {
       background: var(--accent);
       color: #fff;
     }
-    .btn-primary:hover { background: var(--accent-hover); }
-    .btn-primary:disabled {
-      opacity: 0.55;
-      cursor: default;
+    .btn-primary:active { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.55; cursor: default; }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
     }
     .status {
       margin-top: 18px;
@@ -92,11 +103,13 @@
       font-size: 0.9rem;
       color: var(--muted);
       text-align: center;
+      line-height: 1.4;
+      word-break: break-word;
     }
     .status.error { color: #ff8e8e; }
     .status.ok { color: #8fd49a; }
     .tips {
-      margin-top: 36px;
+      margin-top: 32px;
       padding: 16px 18px;
       border-radius: 12px;
       background: rgba(255,255,255,0.03);
@@ -107,36 +120,57 @@
     }
     .tips strong { color: var(--text); }
     ul { margin: 8px 0 0; padding-left: 1.2em; }
-    input[type="file"] { display: none; }
+    /* Visible enough for iOS accessibility but triggered via buttons */
+    .file-input-wrap {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>PPTX Notes Viewer</h1>
     <p class="sub">
-      Open a PowerPoint file to view slides and speaker notes in a new tab.
-      Works in the browser — no install required.
+      Open a PowerPoint from this device or from iCloud / Files / Drive.
+      Works in Safari on iPhone, iPad, and Mac.
     </p>
 
-    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Open PowerPoint file">
+    <div class="drop" id="drop" tabindex="0" role="button"
+         aria-label="Open PowerPoint file from device or cloud">
       <div class="icon">📑</div>
-      <strong>Drop a .pptx here</strong>
-      <span>or click to choose a file</span>
+      <strong>Open a .pptx file</strong>
+      <span id="dropHint">On iPhone/iPad: Browse → iCloud Drive, Downloads, or On My iPhone</span>
       <div class="actions">
-        <button type="button" class="btn-primary" id="btnOpen">Open PowerPoint</button>
+        <button type="button" class="btn-primary" id="btnOpen">Open file</button>
       </div>
     </div>
-    <input type="file" id="fileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+
+    <!--
+      Multiple accept types help iOS Files picker show PPTX from local + cloud providers.
+      No capture attribute — we want Files / iCloud, not camera.
+    -->
+    <div class="file-input-wrap">
+      <input
+        type="file"
+        id="fileInput"
+        accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/octet-stream"
+      >
+    </div>
 
     <p class="status" id="status"></p>
 
     <div class="tips">
-      <strong>Tips</strong>
+      <strong>Apple devices</strong>
       <ul>
-        <li>Each file opens in a <strong>new browser tab</strong>.</li>
-        <li>Allow pop-ups for this site if the tab is blocked.</li>
-        <li>Best with image-based slides (typical AMC decks) and speaker notes.</li>
-        <li>Notes edits stay in that browser unless you export later.</li>
+        <li><strong>iPhone / iPad:</strong> Open file → <em>Browse</em> → iCloud Drive, Downloads, Google Drive, OneDrive, etc.</li>
+        <li><strong>Mac Safari:</strong> choose a local file or a cloud folder synced in Finder.</li>
+        <li>Use a modern <strong>.pptx</strong> (not old .ppt).</li>
+        <li>On iPhone/iPad the viewer often opens <strong>in this tab</strong> (more reliable than pop-ups).</li>
+        <li>Large decks need more memory — if Safari reloads, try a smaller file.</li>
+        <li>Avoid <strong>Private Browsing</strong> if open fails (storage is limited there).</li>
       </ul>
     </div>
   </div>
@@ -144,73 +178,127 @@
   <script src="jszip.min.js"></script>
   <script src="pptx-loader.js"></script>
   <script>
-    const drop = document.getElementById("drop");
-    const fileInput = document.getElementById("fileInput");
-    const btnOpen = document.getElementById("btnOpen");
-    const status = document.getElementById("status");
+    (function () {
+      var drop = document.getElementById("drop");
+      var fileInput = document.getElementById("fileInput");
+      var btnOpen = document.getElementById("btnOpen");
+      var statusEl = document.getElementById("status");
+      var dropHint = document.getElementById("dropHint");
 
-    function setStatus(msg, kind) {
-      status.textContent = msg || "";
-      status.className = "status" + (kind ? " " + kind : "");
-    }
-
-    async function handleFile(file) {
-      if (!file) return;
-      if (!/\.pptx$/i.test(file.name)) {
-        setStatus("Please choose a .pptx file.", "error");
-        return;
+      if (window.PptxNotesLoader && PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile()) {
+        dropHint.textContent =
+          "Tap Open file → Browse → iCloud Drive, Downloads, or On My iPhone / iPad";
+      } else {
+        dropHint.textContent = "Click to choose a file, or drop a .pptx here (desktop)";
       }
-      btnOpen.disabled = true;
-      setStatus("Loading “" + file.name + "”…");
-      try {
-        const result = await PptxNotesLoader.openPptxInNewTab(file, "viewer.html");
-        setStatus("Opened “" + result.deckKey + "” (" + result.slides + " slides) in a new tab.", "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus(err && err.message ? err.message : String(err), "error");
-      }
-      btnOpen.disabled = false;
-    }
 
-    btnOpen.addEventListener("click", function (e) {
-      e.stopPropagation();
-      fileInput.value = "";
-      fileInput.click();
-    });
-    drop.addEventListener("click", function () {
-      fileInput.value = "";
-      fileInput.click();
-    });
-    drop.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
+      function setStatus(msg, kind) {
+        statusEl.textContent = msg || "";
+        statusEl.className = "status" + (kind ? " " + kind : "");
+      }
+
+      function looksLikePptx(file) {
+        if (!file) return false;
+        var n = (file.name || "").toLowerCase();
+        if (n.endsWith(".pptx")) return true;
+        // iOS sometimes strips/odd-names; allow empty name with pptx mime
+        var t = (file.type || "").toLowerCase();
+        if (t.indexOf("presentationml") >= 0 || t.indexOf("powerpoint") >= 0) return true;
+        // Last resort: user picked something from Files — try load and let parser fail
+        if (!n && file.size > 1000) return true;
+        return false;
+      }
+
+      async function handleFile(file) {
+        if (!file) return;
+        if (!looksLikePptx(file) && !(file.name || "").toLowerCase().endsWith(".ppt")) {
+          setStatus("Please choose a PowerPoint .pptx file.", "error");
+          return;
+        }
+        if ((file.name || "").toLowerCase().endsWith(".ppt") && !file.name.toLowerCase().endsWith(".pptx")) {
+          setStatus("Old .ppt format is not supported. Save as .pptx in PowerPoint first.", "error");
+          return;
+        }
+
+        btnOpen.disabled = true;
+        setStatus("Loading “" + (file.name || "presentation") + "”…");
+
+        // Safari: open placeholder tab during the same user gesture when possible
+        var pre = null;
+        var apple = window.PptxNotesLoader && PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile();
+        if (!apple && window.PptxNotesLoader && PptxNotesLoader.openPlaceholderTab) {
+          pre = PptxNotesLoader.openPlaceholderTab();
+        }
+
+        try {
+          var result = await PptxNotesLoader.openPptxInNewTab(file, "viewer.html", {
+            preOpenedWindow: pre,
+            sameTabFallback: true,
+          });
+          if (result.mode === "same-tab") {
+            setStatus("Opening viewer…", "ok");
+          } else {
+            setStatus(
+              "Opened “" + result.deckKey + "” (" + result.slides + " slides) in a new tab.",
+              "ok"
+            );
+          }
+        } catch (err) {
+          console.error(err);
+          if (pre && !pre.closed) {
+            try { pre.close(); } catch (e) {}
+          }
+          setStatus(err && err.message ? err.message : String(err), "error");
+        }
+        btnOpen.disabled = false;
+      }
+
+      function pickFile(e) {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        fileInput.value = "";
         fileInput.click();
       }
-    });
-    fileInput.addEventListener("change", function () {
-      const f = fileInput.files && fileInput.files[0];
-      if (f) handleFile(f);
-    });
 
-    ["dragenter", "dragover"].forEach(function (ev) {
-      drop.addEventListener(ev, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        drop.classList.add("dragover");
+      btnOpen.addEventListener("click", pickFile);
+      drop.addEventListener("click", function (e) {
+        if (e.target === btnOpen || btnOpen.contains(e.target)) return;
+        pickFile(e);
       });
-    });
-    ["dragleave", "drop"].forEach(function (ev) {
-      drop.addEventListener(ev, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (ev === "dragleave") drop.classList.remove("dragover");
+      drop.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          pickFile(e);
+        }
       });
-    });
-    drop.addEventListener("drop", function (e) {
-      drop.classList.remove("dragover");
-      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) handleFile(f);
-    });
+      fileInput.addEventListener("change", function () {
+        var f = fileInput.files && fileInput.files[0];
+        if (f) handleFile(f);
+      });
+
+      // Desktop drag-drop (limited/no-op on iOS — fine)
+      ["dragenter", "dragover"].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.add("dragover");
+        });
+      });
+      ["dragleave", "drop"].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (ev === "dragleave") drop.classList.remove("dragover");
+        });
+      });
+      drop.addEventListener("drop", function (e) {
+        drop.classList.remove("dragover");
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) handleFile(f);
+      });
+    })();
   </script>
 </body>
 </html>

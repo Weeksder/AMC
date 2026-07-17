@@ -376,23 +376,38 @@
     setHideTools(!appEl.classList.contains("hide-tools"));
   });
 
-  // Open another file → new tab
-  btnOpen.addEventListener("click", function () {
+  // Open another file (local / iCloud / Files) — Safari-safe
+  function triggerOpenPicker() {
     openFileInput.value = "";
     openFileInput.click();
-  });
+  }
+  btnOpen.addEventListener("click", triggerOpenPicker);
+  var btnEmptyOpen = document.getElementById("btnEmptyOpen");
+  if (btnEmptyOpen) btnEmptyOpen.addEventListener("click", triggerOpenPicker);
+
   openFileInput.addEventListener("change", async function () {
     const f = openFileInput.files && openFileInput.files[0];
     if (!f) return;
     btnOpen.disabled = true;
     btnOpen.textContent = "…";
+    var pre = null;
+    var apple = PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile();
+    if (!apple) pre = PptxNotesLoader.openPlaceholderTab && PptxNotesLoader.openPlaceholderTab();
     try {
-      await PptxNotesLoader.openPptxInNewTab(f, "viewer.html");
-      if (saveStatus) {
+      var result = await PptxNotesLoader.openPptxInNewTab(f, "viewer.html", {
+        preOpenedWindow: pre,
+        sameTabFallback: true,
+      });
+      if (saveStatus && result.mode === "new-tab") {
         saveStatus.textContent = "opened in new tab";
         saveStatus.classList.add("show");
       }
     } catch (err) {
+      if (pre && !pre.closed) {
+        try {
+          pre.close();
+        } catch (e) {}
+      }
       alert(err && err.message ? err.message : String(err));
     }
     btnOpen.disabled = false;

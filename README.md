@@ -54,5 +54,16 @@ README.md
 - Thumbnails (resize by dragging the edge or scrolling sideways)
 - Main slide + editable notes
 - Hide picture / hide tools
-- Open another `.pptx` in a new tab from the viewer
+- Open another `.pptx` (new tab on desktop; same tab on iPhone/iPad for reliability)
 - Soft line breaks and bold from PowerPoint notes
+- **Safari / iPhone / iPad:** open from **Files**, **iCloud Drive**, Downloads, or other cloud apps via Browse
+
+## Apple devices
+
+1. Open the site in **Safari**
+2. Tap **Open file**
+3. Tap **Browse**
+4. Choose **iCloud Drive**, **On My iPhone/iPad**, **Downloads**, Google Drive, OneDrive, etc.
+5. Select a **.pptx** file
+
+On iPhone/iPad the viewer usually opens **in the same tab** (Safari blocks many pop-ups). On Mac/desktop it prefers a **new tab**.

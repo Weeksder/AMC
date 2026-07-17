@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#e8e8e8">
+  <meta name="format-detection" content="telephone=no">
   <title>Notes Viewer</title>
   <link rel="stylesheet" href="viewer.css">
 </head>
@@ -11,9 +16,12 @@
     <div style="font-size:2rem">📑</div>
     <div style="font-size:1.15rem;font-weight:600">No presentation loaded</div>
     <div style="color:#666;max-width:360px;line-height:1.45">
-      Open a file from the home page, or use <strong>Open</strong> below.
+      Open a .pptx from this device or iCloud / Files, or go back home.
     </div>
-    <p><a href="index.html">← Back to home</a></p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+      <button type="button" id="btnEmptyOpen" style="min-height:44px;padding:10px 16px;border-radius:8px;border:1px solid #ccc;background:#fff;font-size:16px">Open file</button>
+      <a href="index.html" style="line-height:44px">← Home</a>
+    </p>
   </div>
 
   <div class="app" id="app">
@@ -57,7 +65,7 @@
             <button type="button" id="btnOpen" title="Open a PowerPoint in a new tab">Open</button>
             <span id="pageTotal" style="font-size:12px;color:#666;min-width:1.2em;text-align:center"></span>
             <button type="button" id="btnNext" title="Next">▶</button>
-            <input type="file" id="openFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden>
+            <input type="file" id="openFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/octet-stream" hidden>
           </div>
         </div>
         <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"
