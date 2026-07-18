@@ -1063,9 +1063,11 @@
       );
 
       // Always download a NEW name (Brave/Edge: no silent overwrite of the target path)
-      var stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       var base = (mergeSourceFile.name || "slides").replace(/\.pptx$/i, "");
-      var outName = base + "_extracted_" + stamp + ".pptx";
+      // Drop prior extract / edit suffixes so we always end cleanly with _EDIT
+      base = base.replace(/_extracted_[\d\-T:.]+$/i, "");
+      base = base.replace(/_EDIT$/i, "");
+      var outName = base + "_EDIT.pptx";
       downloadBlob(result.blob, outName);
       setStatus(
         $("mergeStatus"),
