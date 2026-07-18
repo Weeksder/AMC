@@ -80,12 +80,28 @@
     return '<p class="empty-notes">No notes for this slide. Click here to type.</p>';
   }
 
+  var SKIP_LOCAL_NOTES = false;
+
   function setDeck(payload) {
     DECK_KEY = payload.deckKey || payload.title || "deck";
     SLIDES = payload.slides || [];
     ORIGINAL_PPTX_BUFFER = payload.pptxBuffer || null;
     ORIGINAL_FILE_NAME = payload.fileName || DECK_KEY + ".pptx";
-    STORAGE_PREFIX = "pptxNotesViewer:v3:" + DECK_KEY + ":";
+    // Include content fingerprint so PDF→EDIT and an older same-name PPTX
+    // do not share cached speaker notes in localStorage.
+    var contentId = payload.contentId || "";
+    if (
+      !contentId &&
+      ORIGINAL_PPTX_BUFFER &&
+      window.PptxNotesLoader &&
+      PptxNotesLoader.bufferFingerprint
+    ) {
+      contentId = PptxNotesLoader.bufferFingerprint(ORIGINAL_PPTX_BUFFER);
+    }
+    STORAGE_PREFIX =
+      "pptxNotesViewer:v4:" + DECK_KEY + ":" + (contentId || "unknown") + ":";
+    // Fresh open (Extract → Viewer / Open file): start from notes in the PPTX only
+    SKIP_LOCAL_NOTES = payload.freshOpen === true;
     document.title = DECK_KEY + " — Notes Viewer";
     deckTitle.textContent = DECK_KEY;
     emptyState.classList.remove("show");
@@ -96,11 +112,21 @@
     thumbsEl.innerHTML = "";
     SLIDES.forEach(function (s, i) {
       s._originalHtml = s.notesHtml || "";
-      const saved = loadSavedNotes(i);
-      if (saved !== null) {
-        s.notesHtml = saved;
-        s.hasNotes = saved.replace(/<[^>]+>/g, "").trim().length > 0;
+      // Only rehydrate browser drafts when not a brand-new open.
+      // Previously, same filename reused old footnotes on a new PDF extract.
+      if (!SKIP_LOCAL_NOTES) {
+        const saved = loadSavedNotes(i);
+        if (saved !== null) {
+          const fromFile = (s.notesHtml || "").replace(/<[^>]+>/g, "").trim();
+          const fromSaved = saved.replace(/<[^>]+>/g, "").trim();
+          // Prefer notes already in the PPTX; only fill empty slides from drafts
+          if (!fromFile && fromSaved) {
+            s.notesHtml = saved;
+            s.hasNotes = true;
+          }
+        }
       }
+      s.hasNotes = !!(s.notesHtml || "").replace(/<[^>]+>/g, "").trim();
       const row = document.createElement("div");
       row.className = "thumb" + (s.hasNotes ? " has-notes" : "");
       row.dataset.i = String(i);
@@ -117,6 +143,8 @@
       });
       thumbsEl.appendChild(row);
     });
+    // After first paint of a fresh open, allow saving drafts for this session
+    SKIP_LOCAL_NOTES = false;
   }
 
   function applyNotesHeight() {

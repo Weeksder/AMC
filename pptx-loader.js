@@ -165,8 +165,31 @@
       String(name || "deck")
         .replace(/[<>:"/\\|?*]+/g, "_")
         .replace(/\.pptx$/i, "")
+        .replace(/\.pdf$/i, "")
         .trim() || "deck"
     );
+  }
+
+  /** Fingerprint so different files with the same name do not share notes cache. */
+  function bufferFingerprint(buf) {
+    if (!buf) return "0";
+    var u8 =
+      buf instanceof ArrayBuffer
+        ? new Uint8Array(buf)
+        : buf instanceof Uint8Array
+          ? buf
+          : new Uint8Array(0);
+    var len = u8.byteLength;
+    if (!len) return "0";
+    var h = 2166136261;
+    var step = Math.max(1, Math.floor(len / 160));
+    for (var i = 0; i < len; i += step) {
+      h ^= u8[i];
+      h = Math.imul(h, 16777619);
+    }
+    h ^= u8[len - 1];
+    h = Math.imul(h, 16777619);
+    return len + "x" + (h >>> 0).toString(16);
   }
 
   async function pptxFileToSlides(file) {
@@ -356,6 +379,7 @@
     var handoffId = String(Date.now()) + "_" + Math.random().toString(36).slice(2, 8);
     // Keep original bytes so SAVE can download a real .pptx with notes (no JSON step)
     var pptxBuffer = await file.arrayBuffer();
+    var contentId = bufferFingerprint(pptxBuffer);
 
     try {
       await handoffPut(handoffId, {
@@ -364,6 +388,9 @@
         slides: slides,
         pptxBuffer: pptxBuffer,
         fileName: file.name || deckKey + ".pptx",
+        contentId: contentId,
+        // Fresh open from Extract / Open — do not rehydrate old localStorage notes
+        freshOpen: true,
         createdAt: Date.now(),
       });
     } catch (e) {
@@ -577,14 +604,119 @@
     });
   }
 
+  /** Strip viewer placeholder / empty notes so we don't write junk into PPTX. */
+  function normalizeNotesHtmlForSave(html) {
+    if (!html) return "";
+    var wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    if (wrap.querySelector && wrap.querySelector("p.empty-notes")) return "";
+    var text = (wrap.innerText || wrap.textContent || "").replace(/\u00a0/g, " ").trim();
+    if (!text) return "";
+    return html;
+  }
+
+  function nextNotesSlideNumber(zip) {
+    var max = 0;
+    Object.keys(zip.files).forEach(function (n) {
+      var m = n.match(/^ppt\/notesSlides\/notesSlide(\d+)\.xml$/i);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return max + 1;
+  }
+
+  /** Full notes part XML (string-built — no DOM xmlns corruption). */
+  function buildNotesSlideXml(paragraphsXml) {
+    return (
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+      'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
+      "<p:cSld><p:spTree>" +
+      '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+      '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>' +
+      '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
+      '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/>' +
+      '<p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr>' +
+      '<p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>' +
+      '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/>' +
+      '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>' +
+      '<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>' +
+      "<p:txBody><a:bodyPr/><a:lstStyle/>" +
+      paragraphsXml +
+      "</p:txBody></p:sp>" +
+      "</p:spTree></p:cSld>" +
+      "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>"
+    );
+  }
+
+  function buildNotesSlideRels(slideFileName) {
+    // Link notes → parent slide (notesMaster optional; PPT opens without it)
+    return (
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/' +
+      slideFileName +
+      '"/>' +
+      "</Relationships>"
+    );
+  }
+
+  function ensureNotesRelOnSlideRels(relsXml, notesFileName) {
+    var target = "../notesSlides/" + notesFileName;
+    if (/notesSlide/i.test(relsXml)) {
+      // Point existing notes relationship at our notes part
+      relsXml = relsXml.replace(
+        /Target="[^"]*notesSlide[^"]*"/gi,
+        'Target="' + target + '"'
+      );
+      return relsXml;
+    }
+    var maxRid = 0;
+    relsXml.replace(/Id="rId(\d+)"/g, function (_, n) {
+      maxRid = Math.max(maxRid, parseInt(n, 10));
+      return _;
+    });
+    var rid = "rId" + (maxRid + 1);
+    var rel =
+      '<Relationship Id="' +
+      rid +
+      '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="' +
+      target +
+      '"/>';
+    if (relsXml.indexOf("</Relationships>") < 0) {
+      return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        rel +
+        "</Relationships>"
+      );
+    }
+    return relsXml.replace("</Relationships>", rel + "</Relationships>");
+  }
+
+  function minimalSlideRelsWithNotes(notesFileName) {
+    return (
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/' +
+      notesFileName +
+      '"/>' +
+      "</Relationships>"
+    );
+  }
+
   /**
    * Write current slide notes into a copy of the original PPTX and return a Blob.
+   * Creates notes parts when missing (common after Extract → blank target / PDF).
    * @param {ArrayBuffer} pptxBuffer
    * @param {Array<{n:number,notesHtml:string}>} slides
    */
   async function buildPptxBlobWithNotes(pptxBuffer, slides) {
     if (typeof JSZip === "undefined") throw new Error("JSZip failed to load");
-    if (!pptxBuffer) throw new Error("Original PowerPoint data missing — open the .pptx again, then SAVE.");
+    if (!pptxBuffer) {
+      throw new Error("Original PowerPoint data missing — open the .pptx again, then SAVE.");
+    }
 
     var zip = await JSZip.loadAsync(pptxBuffer);
     var presRelsFile = zip.file("ppt/_rels/presentation.xml.rels");
@@ -592,7 +724,10 @@
     if (!presRelsFile || !presFile) throw new Error("Invalid PowerPoint file");
 
     var idToTarget = relsMap(await presRelsFile.async("text"));
-    var presDoc = new DOMParser().parseFromString(await presFile.async("text"), "application/xml");
+    var presDoc = new DOMParser().parseFromString(
+      await presFile.async("text"),
+      "application/xml"
+    );
     var R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     var slideTargets = [];
     xmlLocalAll(presDoc, "sldId").forEach(function (el) {
@@ -603,42 +738,94 @@
       slideTargets.push(t);
     });
 
-    var serializer = new XMLSerializer();
+    var nextNotes = nextNotesSlideNumber(zip);
+    var notesPartsCreated = [];
+
     for (var i = 0; i < slideTargets.length; i++) {
       var slidePath = slideTargets[i];
       var slideFile = zip.file(slidePath);
       if (!slideFile) continue;
+
+      var slideBase = slidePath.split("/").pop(); // slide1.xml
       var baseDir = slidePath.split("/").slice(0, -1).join("/");
-      var relsPath = baseDir + "/_rels/" + slidePath.split("/").pop() + ".rels";
+      var relsPath = baseDir + "/_rels/" + slideBase + ".rels";
       var relsFile = zip.file(relsPath);
-      if (!relsFile) continue;
-      var rels = relsMap(await relsFile.async("text"));
+      var relsXml = relsFile
+        ? await relsFile.async("text")
+        : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+      var rels = relsMap(relsXml);
+
+      var notesHtml = "";
+      if (slides[i]) notesHtml = normalizeNotesHtmlForSave(slides[i].notesHtml || "");
+      var paragraphsXml = notesHtmlToOoxmlParagraphs(notesHtml);
+
+      // Existing notes part?
       var notesRid = Object.keys(rels).find(function (id) {
         return (rels[id] || "").toLowerCase().indexOf("notesslide") >= 0;
       });
-      if (!notesRid) continue;
-      var notesPath = joinPptPath(baseDir, rels[notesRid]);
-      var notesFile = zip.file(notesPath);
-      if (!notesFile) continue;
+      var notesPath = null;
+      var notesFileName = null;
 
-      var notesHtml = "";
-      if (slides[i]) notesHtml = slides[i].notesHtml || "";
-      var notesXml = await notesFile.async("text");
-      var notesDoc = new DOMParser().parseFromString(notesXml, "application/xml");
-      var txBody = findNotesTxBody(notesDoc);
-      if (!txBody) continue;
-      setTxBodyParagraphs(txBody, notesHtmlToOoxmlParagraphs(notesHtml));
-      var outXml = serializer.serializeToString(notesDoc);
-      // Ensure XML declaration
-      if (outXml.indexOf("<?xml") !== 0) {
-        outXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + outXml;
+      if (notesRid) {
+        notesPath = joinPptPath(baseDir, rels[notesRid]);
+        notesFileName = notesPath.split("/").pop();
+      } else {
+        // Create new notes slide (extracted/blank decks often have none)
+        notesFileName = "notesSlide" + nextNotes + ".xml";
+        nextNotes++;
+        notesPath = "ppt/notesSlides/" + notesFileName;
+        notesPartsCreated.push(notesPath);
+        if (!relsFile) {
+          relsXml = minimalSlideRelsWithNotes(notesFileName);
+        } else {
+          relsXml = ensureNotesRelOnSlideRels(relsXml, notesFileName);
+        }
+        zip.file(relsPath, relsXml);
       }
-      zip.file(notesPath, outXml);
+
+      // Always rewrite notes XML from scratch so content is reliable
+      zip.file(notesPath, buildNotesSlideXml(paragraphsXml));
+      zip.file(
+        "ppt/notesSlides/_rels/" + notesFileName + ".rels",
+        buildNotesSlideRels(slideBase)
+      );
+
+      // If notes existed, still ensure slide rels target is correct
+      if (notesRid) {
+        relsXml = ensureNotesRelOnSlideRels(relsXml, notesFileName);
+        zip.file(relsPath, relsXml);
+      }
+    }
+
+    // Content_Types: notes slide overrides
+    var ctFile = zip.file("[Content_Types].xml");
+    if (ctFile) {
+      var ctXml = await ctFile.async("string");
+      var allNotes = Object.keys(zip.files).filter(function (n) {
+        return /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(n);
+      });
+      var ctAdds = [];
+      allNotes.forEach(function (n) {
+        var part = "/" + n;
+        if (ctXml.indexOf('PartName="' + part + '"') < 0) {
+          ctAdds.push(
+            '<Override PartName="' +
+              part +
+              '" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>'
+          );
+        }
+      });
+      if (ctAdds.length) {
+        ctXml = ctXml.replace("</Types>", ctAdds.join("") + "</Types>");
+        zip.file("[Content_Types].xml", ctXml);
+      }
     }
 
     return await zip.generateAsync({
       type: "blob",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       compression: "DEFLATE",
     });
   }
@@ -685,6 +872,7 @@
     handoffTake: handoffTake,
     handoffPut: handoffPut,
     safeDeckKey: safeDeckKey,
+    bufferFingerprint: bufferFingerprint,
     isAppleMobile: isAppleMobile,
     buildPptxBlobWithNotes: buildPptxBlobWithNotes,
     downloadBlob: downloadBlob,
