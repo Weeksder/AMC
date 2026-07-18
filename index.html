@@ -96,6 +96,85 @@
       margin-top: 16px;
     }
     .btn-amc:active { background: #2c5282; }
+    .feedback-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      margin-top: 10px;
+    }
+    .btn-feedback {
+      flex: 1;
+      background: #2f855a;
+      color: #fff;
+      min-height: 48px;
+    }
+    .btn-feedback:active { background: #276749; }
+    .btn-feedback-edit {
+      flex: 0 0 44px;
+      width: 44px;
+      min-width: 44px;
+      padding: 0;
+      background: #3a4150;
+      color: #eef1f6;
+      font-size: 1.15rem;
+      line-height: 1;
+      border: 1px solid var(--border);
+    }
+    .btn-feedback-edit:active { background: #4a5568; }
+    .btn-feedback-edit:hover { background: #454d5c; }
+    .feedback-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0,0,0,.55);
+      padding: calc(16px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
+      align-items: center;
+      justify-content: center;
+    }
+    .feedback-modal.open { display: flex; }
+    .feedback-modal-card {
+      width: min(560px, 100%);
+      max-height: min(85vh, 720px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    }
+    .feedback-modal-card h3 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 650;
+    }
+    .feedback-modal-card textarea {
+      width: 100%;
+      min-height: 220px;
+      flex: 1;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #1a1d23;
+      color: var(--text);
+      padding: 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+    .feedback-modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .feedback-modal-actions .btn-primary { min-width: 100px; }
+    .feedback-modal-actions .btn-cancel {
+      background: #3a4150;
+      color: #eef1f6;
+    }
     .status {
       margin-top: 18px;
       min-height: 1.4em;
@@ -177,7 +256,12 @@
       </div>
     </div>
 
-    <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Online Class</a>
+    <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Teacher Login</a>
+
+    <div class="feedback-row">
+      <button type="button" class="btn btn-feedback" id="btnFeedbackCopy">Feedback comment</button>
+      <button type="button" class="btn btn-feedback-edit" id="btnFeedbackEdit" title="Edit feedback text" aria-label="Edit feedback text">✏️</button>
+    </div>
 
     <div class="file-input-wrap">
       <input
@@ -188,6 +272,17 @@
     </div>
 
     <p class="status" id="status"></p>
+  </div>
+
+  <div class="feedback-modal" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle">
+    <div class="feedback-modal-card">
+      <h3 id="feedbackModalTitle">Edit feedback comment</h3>
+      <textarea id="feedbackEditText" spellcheck="true"></textarea>
+      <div class="feedback-modal-actions">
+        <button type="button" class="btn btn-cancel" id="feedbackEditCancel">Cancel</button>
+        <button type="button" class="btn-primary" id="feedbackEditSave">Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- AMC tools embedded below notes viewer -->
@@ -212,15 +307,26 @@
   <script src="pptx-loader.js"></script>
   <script>
     (function () {
-      // ========== PASTE YOUR AMC ONLINE CLASS LINK HERE ==========
+      // ========== PASTE YOUR AMC TEACHER LOGIN LINK HERE ==========
       var AMC_ONLINE_CLASS_URL = "https://www.xn--fiqv34aqphd4v.com/member/Login_teacher_rwd.aspx";
       // ===========================================================
+
+      var FEEDBACK_STORAGE_KEY = "amc_feedback_comment_v1";
+      var DEFAULT_FEEDBACK_TEXT =
+        "Thank you for joining today's class! Your skill in reading sentences really stood out. You demonstrated an excellent grasp of the material, significantly enriching our discussions. Additionally, the way you responded to my questions was impressive. Your thoughtful and clear replies showcased a deep understanding of the subject matter.\n\n" +
+        "I want to commend your effort and commitment. I'm excited to see your continuous improvement and contributions in future sessions. Keep up the great work! Please review what we covered in class to reinforce your memory. Also, try incorporating the new vocabulary into your daily conversations and focus on improving your pronunciation. Don't forget to pay attention to tricky words, and the linking of sounds between words, and work on your intonation for a more natural flow in speech.";
 
       var drop = document.getElementById("drop");
       var fileInput = document.getElementById("fileInput");
       var btnOpen = document.getElementById("btnOpen");
       var btnAmc = document.getElementById("btnAmcClass");
       var statusEl = document.getElementById("status");
+      var btnFeedbackCopy = document.getElementById("btnFeedbackCopy");
+      var btnFeedbackEdit = document.getElementById("btnFeedbackEdit");
+      var feedbackModal = document.getElementById("feedbackModal");
+      var feedbackEditText = document.getElementById("feedbackEditText");
+      var feedbackEditCancel = document.getElementById("feedbackEditCancel");
+      var feedbackEditSave = document.getElementById("feedbackEditSave");
 
       if (AMC_ONLINE_CLASS_URL && AMC_ONLINE_CLASS_URL.indexOf("REPLACE_WITH_") === -1) {
         btnAmc.href = AMC_ONLINE_CLASS_URL;
@@ -235,6 +341,88 @@
         statusEl.textContent = msg || "";
         statusEl.className = "status" + (kind ? " " + kind : "");
       }
+
+      function getFeedbackText() {
+        try {
+          var saved = localStorage.getItem(FEEDBACK_STORAGE_KEY);
+          if (saved != null && String(saved).trim()) return String(saved);
+        } catch (e) {}
+        return DEFAULT_FEEDBACK_TEXT;
+      }
+
+      function setFeedbackText(text) {
+        try {
+          localStorage.setItem(FEEDBACK_STORAGE_KEY, text);
+        } catch (e) {}
+      }
+
+      async function copyFeedbackText() {
+        var text = getFeedbackText();
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            throw new Error("no clipboard api");
+          }
+          setStatus("Feedback comment copied.", "ok");
+        } catch (e) {
+          try {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+            setStatus("Feedback comment copied.", "ok");
+          } catch (err) {
+            setStatus("Could not copy — open edit and copy manually.", "error");
+          }
+        }
+      }
+
+      function openFeedbackEditor() {
+        feedbackEditText.value = getFeedbackText();
+        feedbackModal.classList.add("open");
+        setTimeout(function () {
+          feedbackEditText.focus();
+        }, 50);
+      }
+
+      function closeFeedbackEditor() {
+        feedbackModal.classList.remove("open");
+      }
+
+      if (btnFeedbackCopy) {
+        btnFeedbackCopy.addEventListener("click", function () {
+          copyFeedbackText();
+        });
+      }
+      if (btnFeedbackEdit) {
+        btnFeedbackEdit.addEventListener("click", openFeedbackEditor);
+      }
+      if (feedbackEditCancel) {
+        feedbackEditCancel.addEventListener("click", closeFeedbackEditor);
+      }
+      if (feedbackEditSave) {
+        feedbackEditSave.addEventListener("click", function () {
+          setFeedbackText(feedbackEditText.value);
+          closeFeedbackEditor();
+          setStatus("Feedback comment saved.", "ok");
+        });
+      }
+      if (feedbackModal) {
+        feedbackModal.addEventListener("click", function (e) {
+          if (e.target === feedbackModal) closeFeedbackEditor();
+        });
+      }
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && feedbackModal && feedbackModal.classList.contains("open")) {
+          closeFeedbackEditor();
+        }
+      });
 
       function looksLikePptx(file) {
         if (!file) return false;
