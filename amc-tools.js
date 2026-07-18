@@ -350,6 +350,7 @@
     } catch (e) {}
 
     // Media: prefix names so they never collide
+    // IMPORTANT: rename carefully — image1.jpeg must not match inside image11.jpeg
     var mediaMap = {};
     var srcMedia = Object.keys(srcZip.files).filter(function (n) {
       return n.indexOf("ppt/media/") === 0 && !srcZip.files[n].dir;
@@ -357,14 +358,12 @@
     for (var mi = 0; mi < srcMedia.length; mi++) {
       var mp = srcMedia[mi];
       var base = mp.split("/").pop();
-      var newBase = "_src_" + base;
+      // Unique name that cannot be a prefix of another image name
+      var newBase = "x" + mi + "_" + base;
       var newPath = "ppt/media/" + newBase;
       var c = 1;
       while (tgtZip.file(newPath)) {
-        var dot = base.lastIndexOf(".");
-        var stem = dot > 0 ? base.slice(0, dot) : base;
-        var ext = dot > 0 ? base.slice(dot) : "";
-        newBase = "_src_" + stem + "_" + c + ext;
+        newBase = "x" + mi + "_" + c + "_" + base;
         newPath = "ppt/media/" + newBase;
         c++;
       }
@@ -372,28 +371,62 @@
       mediaMap[base] = newBase;
     }
 
+    function escapeRegExp(s) {
+      return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
     function remapMediaInText(text) {
       if (!text) return text;
-      Object.keys(mediaMap).forEach(function (oldN) {
+      // Longest names first so image11.jpeg is not partially matched as image1.jpeg
+      var keys = Object.keys(mediaMap).sort(function (a, b) {
+        return b.length - a.length;
+      });
+      keys.forEach(function (oldN) {
         var neu = mediaMap[oldN];
-        text = text.split("../media/" + oldN).join("../media/" + neu);
-        text = text.split("media/" + oldN).join("media/" + neu);
-        // relationship Target="image1.png" style
+        var esc = escapeRegExp(oldN);
+        // ../media/name or /media/name — only full filename before " ? # or end
         text = text.replace(
-          new RegExp('(Target="[^"]*)' + oldN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+          new RegExp("(\\.\\./media/|/media/|media/)" + esc + '(?=["\'?#\\s>]|$)', "g"),
           "$1" + neu
         );
+        // Target="image1.jpeg"
+        text = text.replace(new RegExp('(Target=")' + esc + '(")', "g"), "$1" + neu + "$2");
       });
       return text;
     }
 
-    // Desktop "repair" cleanup: flatten short source/note text margins via safe regex
+    // Ensure Content_Types has image defaults (blank shell may lack some)
+    function ensureImageContentTypes(ctXml) {
+      var defaults = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        emf: "image/x-emf",
+        wmf: "image/x-wmf",
+        tiff: "image/tiff",
+        bin: "application/octet-stream",
+      };
+      Object.keys(defaults).forEach(function (ext) {
+        var re = new RegExp('Extension="' + ext + '"', "i");
+        if (!re.test(ctXml)) {
+          ctXml = ctXml.replace(
+            "<Types",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
+          );
+          // If xmlns already on Types, simple insert Default after <Types...>
+          ctXml = ctXml.replace(
+            /(<Types[^>]*>)/,
+            '$1<Default Extension="' + ext + '" ContentType="' + defaults[ext] + '"/>'
+          );
+        }
+      });
+      return ctXml;
+    }
+
+    // Light cleanup — do NOT use DOM (breaks namespaces / images)
     function repairSlideXml(xml) {
-      // strip marL/indent on paragraphs inside short text (best-effort, no DOM)
-      return xml
-        .replace(/\smarL="[^"]*"/g, "")
-        .replace(/\sindent="[^"]*"/g, "")
-        .replace(/\slvl="[1-9][^"]*"/g, ' lvl="0"');
+      return xml;
     }
 
     var addedMeta = []; // {newNum, rid, id}
@@ -415,10 +448,9 @@
       var nsp = "ppt/slides/slide" + newNum + ".xml";
       var nrp = "ppt/slides/_rels/slide" + newNum + ".xml.rels";
 
+      // Slide XML uses r:embed="rIdN" only — do not rename strings inside slide XML
       var xml = await srcZip.file(sp).async("string");
-      xml = remapMediaInText(xml);
       xml = repairSlideXml(xml);
-      // ensure xml declaration
       if (xml.indexOf("<?xml") !== 0) {
         xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
       }
@@ -426,6 +458,7 @@
 
       if (srcZip.file(rp)) {
         var rels = await srcZip.file(rp).async("string");
+        // Relationships hold Target="../media/imageN.jpeg" — remap filenames here
         rels = remapMediaInText(rels);
 
         // Copy notes slide if linked
@@ -557,8 +590,9 @@
     }
     tgtZip.file("ppt/presentation.xml", prsXml);
 
-    // --- Content_Types: add Override lines without xmlns="" ---
+    // --- Content_Types: image defaults + slide overrides (no DOM xmlns="") ---
     var ctXml = await tgtZip.file("[Content_Types].xml").async("string");
+    ctXml = ensureImageContentTypes(ctXml);
     var ctAdds = [];
     addedMeta.forEach(function (meta) {
       var part = "/ppt/slides/slide" + meta.newNum + ".xml";
@@ -569,10 +603,7 @@
             '" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
         );
       }
-      // notes if present
-      var notesPart = "/ppt/notesSlides/notesSlide";
     });
-    // notes content types
     Object.keys(tgtZip.files).forEach(function (n) {
       var m = n.match(/^ppt\/notesSlides\/(notesSlide\d+)\.xml$/);
       if (!m) return;
