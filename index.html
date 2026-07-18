@@ -109,7 +109,14 @@
       min-height: 48px;
     }
     .btn-feedback:active { background: #276749; }
-    .btn-feedback-edit {
+    .btn-sentences {
+      flex: 1;
+      background: #6b46c1;
+      color: #fff;
+      min-height: 48px;
+    }
+    .btn-sentences:active { background: #553c9a; }
+    .btn-snippet-edit {
       flex: 0 0 44px;
       width: 44px;
       min-width: 44px;
@@ -120,9 +127,9 @@
       line-height: 1;
       border: 1px solid var(--border);
     }
-    .btn-feedback-edit:active { background: #4a5568; }
-    .btn-feedback-edit:hover { background: #454d5c; }
-    .feedback-modal {
+    .btn-snippet-edit:active { background: #4a5568; }
+    .btn-snippet-edit:hover { background: #454d5c; }
+    .snippet-modal {
       display: none;
       position: fixed;
       inset: 0;
@@ -132,8 +139,8 @@
       align-items: center;
       justify-content: center;
     }
-    .feedback-modal.open { display: flex; }
-    .feedback-modal-card {
+    .snippet-modal.open { display: flex; }
+    .snippet-modal-card {
       width: min(560px, 100%);
       max-height: min(85vh, 720px);
       background: var(--card);
@@ -145,12 +152,12 @@
       gap: 12px;
       box-shadow: 0 12px 40px rgba(0,0,0,.4);
     }
-    .feedback-modal-card h3 {
+    .snippet-modal-card h3 {
       margin: 0;
       font-size: 1.05rem;
       font-weight: 650;
     }
-    .feedback-modal-card textarea {
+    .snippet-modal-card textarea {
       width: 100%;
       min-height: 220px;
       flex: 1;
@@ -164,14 +171,14 @@
       font-size: 0.95rem;
       line-height: 1.45;
     }
-    .feedback-modal-actions {
+    .snippet-modal-actions {
       display: flex;
       gap: 8px;
       justify-content: flex-end;
       flex-wrap: wrap;
     }
-    .feedback-modal-actions .btn-primary { min-width: 100px; }
-    .feedback-modal-actions .btn-cancel {
+    .snippet-modal-actions .btn-primary { min-width: 100px; }
+    .snippet-modal-actions .btn-cancel {
       background: #3a4150;
       color: #eef1f6;
     }
@@ -260,7 +267,11 @@
 
     <div class="feedback-row">
       <button type="button" class="btn btn-feedback" id="btnFeedbackCopy">Feedback comment</button>
-      <button type="button" class="btn btn-feedback-edit" id="btnFeedbackEdit" title="Edit feedback text" aria-label="Edit feedback text">✏️</button>
+      <button type="button" class="btn btn-snippet-edit" id="btnFeedbackEdit" title="Edit feedback text" aria-label="Edit feedback text">✏️</button>
+    </div>
+    <div class="feedback-row">
+      <button type="button" class="btn btn-sentences" id="btnSentencesCopy">Create Sentences</button>
+      <button type="button" class="btn btn-snippet-edit" id="btnSentencesEdit" title="Edit Create Sentences text" aria-label="Edit Create Sentences text">✏️</button>
     </div>
 
     <div class="file-input-wrap">
@@ -274,13 +285,13 @@
     <p class="status" id="status"></p>
   </div>
 
-  <div class="feedback-modal" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle">
-    <div class="feedback-modal-card">
-      <h3 id="feedbackModalTitle">Edit feedback comment</h3>
-      <textarea id="feedbackEditText" spellcheck="true"></textarea>
-      <div class="feedback-modal-actions">
-        <button type="button" class="btn btn-cancel" id="feedbackEditCancel">Cancel</button>
-        <button type="button" class="btn-primary" id="feedbackEditSave">Save</button>
+  <div class="snippet-modal" id="snippetModal" role="dialog" aria-modal="true" aria-labelledby="snippetModalTitle">
+    <div class="snippet-modal-card">
+      <h3 id="snippetModalTitle">Edit text</h3>
+      <textarea id="snippetEditText" spellcheck="true"></textarea>
+      <div class="snippet-modal-actions">
+        <button type="button" class="btn btn-cancel" id="snippetEditCancel">Cancel</button>
+        <button type="button" class="btn-primary" id="snippetEditSave">Save</button>
       </div>
     </div>
   </div>
@@ -311,10 +322,26 @@
       var AMC_ONLINE_CLASS_URL = "https://www.xn--fiqv34aqphd4v.com/member/Login_teacher_rwd.aspx";
       // ===========================================================
 
-      var FEEDBACK_STORAGE_KEY = "amc_feedback_comment_v1";
-      var DEFAULT_FEEDBACK_TEXT =
-        "Thank you for joining today's class! Your skill in reading sentences really stood out. You demonstrated an excellent grasp of the material, significantly enriching our discussions. Additionally, the way you responded to my questions was impressive. Your thoughtful and clear replies showcased a deep understanding of the subject matter.\n\n" +
-        "I want to commend your effort and commitment. I'm excited to see your continuous improvement and contributions in future sessions. Keep up the great work! Please review what we covered in class to reinforce your memory. Also, try incorporating the new vocabulary into your daily conversations and focus on improving your pronunciation. Don't forget to pay attention to tricky words, and the linking of sounds between words, and work on your intonation for a more natural flow in speech.";
+      var SNIPPETS = {
+        feedback: {
+          key: "amc_feedback_comment_v1",
+          label: "Feedback comment",
+          title: "Edit feedback comment",
+          defaultText:
+            "Thank you for joining today's class! Your skill in reading sentences really stood out. You demonstrated an excellent grasp of the material, significantly enriching our discussions. Additionally, the way you responded to my questions was impressive. Your thoughtful and clear replies showcased a deep understanding of the subject matter.\n\n" +
+            "I want to commend your effort and commitment. I'm excited to see your continuous improvement and contributions in future sessions. Keep up the great work! Please review what we covered in class to reinforce your memory. Also, try incorporating the new vocabulary into your daily conversations and focus on improving your pronunciation. Don't forget to pay attention to tricky words, and the linking of sounds between words, and work on your intonation for a more natural flow in speech.",
+        },
+        sentences: {
+          key: "amc_create_sentences_v1",
+          label: "Create Sentences",
+          title: "Edit Create Sentences text",
+          defaultText:
+            "Ten example sentences of each word, bold the main word, one brief definition, 5 normal 5 nuance, no need to have text headers to clarify that, just list the sentences, don't have any emoji icons, ignore \"make a sentence\" cause we're already making ten, and ignore making any examples for synonyms if listed. Make sure to have a line break from the next word examples, and don't make it for the synonyms\n\n" +
+            "Example:\n" +
+            "view (n.) — what you can see from a place or perspective\n" +
+            "Lyle booked early to get a seat with a good view of the stage.",
+        },
+      };
 
       var drop = document.getElementById("drop");
       var fileInput = document.getElementById("fileInput");
@@ -323,10 +350,14 @@
       var statusEl = document.getElementById("status");
       var btnFeedbackCopy = document.getElementById("btnFeedbackCopy");
       var btnFeedbackEdit = document.getElementById("btnFeedbackEdit");
-      var feedbackModal = document.getElementById("feedbackModal");
-      var feedbackEditText = document.getElementById("feedbackEditText");
-      var feedbackEditCancel = document.getElementById("feedbackEditCancel");
-      var feedbackEditSave = document.getElementById("feedbackEditSave");
+      var btnSentencesCopy = document.getElementById("btnSentencesCopy");
+      var btnSentencesEdit = document.getElementById("btnSentencesEdit");
+      var snippetModal = document.getElementById("snippetModal");
+      var snippetModalTitle = document.getElementById("snippetModalTitle");
+      var snippetEditText = document.getElementById("snippetEditText");
+      var snippetEditCancel = document.getElementById("snippetEditCancel");
+      var snippetEditSave = document.getElementById("snippetEditSave");
+      var editingSnippetId = null;
 
       if (AMC_ONLINE_CLASS_URL && AMC_ONLINE_CLASS_URL.indexOf("REPLACE_WITH_") === -1) {
         btnAmc.href = AMC_ONLINE_CLASS_URL;
@@ -342,29 +373,34 @@
         statusEl.className = "status" + (kind ? " " + kind : "");
       }
 
-      function getFeedbackText() {
+      function getSnippetText(id) {
+        var sn = SNIPPETS[id];
+        if (!sn) return "";
         try {
-          var saved = localStorage.getItem(FEEDBACK_STORAGE_KEY);
+          var saved = localStorage.getItem(sn.key);
           if (saved != null && String(saved).trim()) return String(saved);
         } catch (e) {}
-        return DEFAULT_FEEDBACK_TEXT;
+        return sn.defaultText;
       }
 
-      function setFeedbackText(text) {
+      function setSnippetText(id, text) {
+        var sn = SNIPPETS[id];
+        if (!sn) return;
         try {
-          localStorage.setItem(FEEDBACK_STORAGE_KEY, text);
+          localStorage.setItem(sn.key, text);
         } catch (e) {}
       }
 
-      async function copyFeedbackText() {
-        var text = getFeedbackText();
+      async function copySnippet(id) {
+        var sn = SNIPPETS[id];
+        var text = getSnippetText(id);
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(text);
           } else {
             throw new Error("no clipboard api");
           }
-          setStatus("Feedback comment copied.", "ok");
+          setStatus((sn ? sn.label : "Text") + " copied.", "ok");
         } catch (e) {
           try {
             var ta = document.createElement("textarea");
@@ -376,51 +412,70 @@
             ta.select();
             document.execCommand("copy");
             document.body.removeChild(ta);
-            setStatus("Feedback comment copied.", "ok");
+            setStatus((sn ? sn.label : "Text") + " copied.", "ok");
           } catch (err) {
             setStatus("Could not copy — open edit and copy manually.", "error");
           }
         }
       }
 
-      function openFeedbackEditor() {
-        feedbackEditText.value = getFeedbackText();
-        feedbackModal.classList.add("open");
+      function openSnippetEditor(id) {
+        var sn = SNIPPETS[id];
+        if (!sn) return;
+        editingSnippetId = id;
+        if (snippetModalTitle) snippetModalTitle.textContent = sn.title;
+        if (snippetEditText) snippetEditText.value = getSnippetText(id);
+        if (snippetModal) snippetModal.classList.add("open");
         setTimeout(function () {
-          feedbackEditText.focus();
+          if (snippetEditText) snippetEditText.focus();
         }, 50);
       }
 
-      function closeFeedbackEditor() {
-        feedbackModal.classList.remove("open");
+      function closeSnippetEditor() {
+        editingSnippetId = null;
+        if (snippetModal) snippetModal.classList.remove("open");
       }
 
       if (btnFeedbackCopy) {
         btnFeedbackCopy.addEventListener("click", function () {
-          copyFeedbackText();
+          copySnippet("feedback");
         });
       }
       if (btnFeedbackEdit) {
-        btnFeedbackEdit.addEventListener("click", openFeedbackEditor);
-      }
-      if (feedbackEditCancel) {
-        feedbackEditCancel.addEventListener("click", closeFeedbackEditor);
-      }
-      if (feedbackEditSave) {
-        feedbackEditSave.addEventListener("click", function () {
-          setFeedbackText(feedbackEditText.value);
-          closeFeedbackEditor();
-          setStatus("Feedback comment saved.", "ok");
+        btnFeedbackEdit.addEventListener("click", function () {
+          openSnippetEditor("feedback");
         });
       }
-      if (feedbackModal) {
-        feedbackModal.addEventListener("click", function (e) {
-          if (e.target === feedbackModal) closeFeedbackEditor();
+      if (btnSentencesCopy) {
+        btnSentencesCopy.addEventListener("click", function () {
+          copySnippet("sentences");
+        });
+      }
+      if (btnSentencesEdit) {
+        btnSentencesEdit.addEventListener("click", function () {
+          openSnippetEditor("sentences");
+        });
+      }
+      if (snippetEditCancel) {
+        snippetEditCancel.addEventListener("click", closeSnippetEditor);
+      }
+      if (snippetEditSave) {
+        snippetEditSave.addEventListener("click", function () {
+          if (!editingSnippetId) return;
+          setSnippetText(editingSnippetId, snippetEditText.value);
+          var sn = SNIPPETS[editingSnippetId];
+          closeSnippetEditor();
+          setStatus((sn ? sn.label : "Text") + " saved.", "ok");
+        });
+      }
+      if (snippetModal) {
+        snippetModal.addEventListener("click", function (e) {
+          if (e.target === snippetModal) closeSnippetEditor();
         });
       }
       document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && feedbackModal && feedbackModal.classList.contains("open")) {
-          closeFeedbackEditor();
+        if (e.key === "Escape" && snippetModal && snippetModal.classList.contains("open")) {
+          closeSnippetEditor();
         }
       });
 
