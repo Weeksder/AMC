@@ -11,7 +11,8 @@
   --thumb-num-w: 22px;
   --v-split: 5px;
   --notes-h: 34vh;
-  --splitter-h: 8px;
+  /* Must match .splitter height so the bar does not overflow into the notes toolbar */
+  --splitter-h: 14px;
   --notes-line-height: 1.15;
   --notes-para-gap: 0px;
   --notes-blank-gap: 0px;
@@ -173,13 +174,20 @@ html, body {
   z-index: 2;
 }
 .splitter {
-  height: max(var(--splitter-h), 14px);
+  height: var(--splitter-h);
+  min-height: var(--splitter-h);
+  max-height: var(--splitter-h);
+  box-sizing: border-box;
   cursor: ns-resize;
   background: linear-gradient(to bottom, #cfcfcf, #e4e4e4);
   border-top: 1px solid #bbb;
   border-bottom: 1px solid #bbb;
   z-index: 5;
   touch-action: none;
+  position: relative;
+  /* Stay inside its grid row — do not cover the notes toolbar */
+  overflow: hidden;
+  flex-shrink: 0;
 }
 .splitter:hover, .splitter.dragging { background: var(--accent-soft); }
 .splitter::after {
@@ -192,8 +200,8 @@ html, body {
   margin: -1.5px 0 0 -21px;
   border-radius: 2px;
   background: #999;
+  pointer-events: none;
 }
-.splitter { position: relative; }
 
 .notes-pane {
   background: var(--notes-bg);
@@ -201,6 +209,9 @@ html, body {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  /* Keep toolbar fully below the resizer hit area */
+  position: relative;
+  z-index: 1;
 }
 .notes-bar {
   display: flex;
@@ -208,10 +219,12 @@ html, body {
   justify-content: space-between;
   gap: 4px;
   flex-wrap: wrap;
-  padding: 3px 8px;
+  padding: 6px 8px 4px;
   border-bottom: 1px solid #e0e0e0;
   flex-shrink: 0;
   background: #fafafa;
+  position: relative;
+  z-index: 2;
 }
 .notes-bar .left,
 .notes-bar .nav,
