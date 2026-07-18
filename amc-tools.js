@@ -4,13 +4,41 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-18d";
+  var TOOL_VERSION = "2026-07-18e";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  /** Yield so the browser can paint labels/status before heavy zip work. */
+  function yieldToUI() {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, 0);
+    });
+  }
+
+  /** Load Tesseract only when OCR is used (not on every page open). */
+  var tesseractLoadPromise = null;
+  function ensureTesseract() {
+    if (typeof Tesseract !== "undefined") return Promise.resolve();
+    if (tesseractLoadPromise) return tesseractLoadPromise;
+    tesseractLoadPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      s.async = true;
+      s.onload = function () {
+        resolve();
+      };
+      s.onerror = function () {
+        tesseractLoadPromise = null;
+        reject(new Error("Could not load OCR engine (need internet once)."));
+      };
+      document.head.appendChild(s);
+    });
+    return tesseractLoadPromise;
   }
 
   function setStatus(el, msg, kind) {
@@ -162,6 +190,13 @@
   var ocrFile = $("ocrFile");
 
   async function runOcrOnBlob(blob) {
+    setStatus(ocrStatus, "Loading OCR engine…");
+    try {
+      await ensureTesseract();
+    } catch (e) {
+      setStatus(ocrStatus, e.message || "OCR engine failed to load.", "err");
+      return;
+    }
     if (typeof Tesseract === "undefined") {
       setStatus(ocrStatus, "Tesseract.js failed to load (need internet once for CDN).", "err");
       return;
@@ -259,11 +294,14 @@
 
   // ---- Merge slides ----
   var mergeSourceFile = null;
+  var mergeSourceBuf = null; // cached ArrayBuffer — avoid re-reading / re-parsing freezes
   var mergeTargetFile = null;
   var mergeTargetHandle = null; // FileSystemFileHandle for overwrite (Chrome/Edge)
+  var mergeSourceLoadId = 0;
 
   function setMergeSource(file) {
     mergeSourceFile = file;
+    mergeSourceBuf = null;
     $("mergeSourceLabel").textContent = file ? file.name : "Drop or click";
   }
   function setMergeTarget(file, handle) {
@@ -275,31 +313,85 @@
     $("mergeTargetLabel").textContent = label;
   }
 
+  async function getMergeSourceBuffer() {
+    if (mergeSourceBuf) return mergeSourceBuf;
+    if (!mergeSourceFile) throw new Error("No source file.");
+    mergeSourceBuf = await readFileAsArrayBuffer(mergeSourceFile);
+    return mergeSourceBuf;
+  }
+
+  /**
+   * Instant UI feedback, then count slides in the background so the page
+   * does not freeze while a multi‑MB PPTX is parsed.
+   */
   async function loadSourceFromFile(f) {
     if (!f || !/\.pptx$/i.test(f.name || "")) return;
+    var loadId = ++mergeSourceLoadId;
     setMergeSource(f);
-    var z = await JSZip.loadAsync(await readFileAsArrayBuffer(f));
-    var c = slideNames(z).length;
-    if (!c) {
-      setStatus($("mergeStatus"), "Source has 0 slides — pick a different PPTX.", "err");
-      return;
+    if ($("mergeSlides")) {
+      $("mergeSlides").value = "";
+      $("mergeSlides").placeholder = "counting slides…";
     }
-    $("mergeSlides").value = "1-" + c;
-    setStatus($("mergeStatus"), "Source: " + c + " slides — ready to Extract into blank target.", "ok");
+    setStatus(
+      $("mergeStatus"),
+      "Source selected: " + f.name + " — counting slides…",
+      "ok"
+    );
+    // Paint label/status before JSZip blocks the main thread
+    await yieldToUI();
+    await yieldToUI();
+    try {
+      var buf = await readFileAsArrayBuffer(f);
+      if (loadId !== mergeSourceLoadId) return; // user picked another file
+      mergeSourceBuf = buf;
+      await yieldToUI();
+      var z = await JSZip.loadAsync(buf, { checkCRC32: false });
+      if (loadId !== mergeSourceLoadId) return;
+      var c = slideNames(z).length;
+      if (!c) {
+        setStatus($("mergeStatus"), "Source has 0 slides — pick a different PPTX.", "err");
+        return;
+      }
+      if ($("mergeSlides")) {
+        $("mergeSlides").value = "1-" + c;
+        $("mergeSlides").placeholder = "1-10";
+      }
+      setStatus(
+        $("mergeStatus"),
+        "Source: " + c + " slides — ready to Extract into blank target.",
+        "ok"
+      );
+    } catch (e) {
+      if (loadId !== mergeSourceLoadId) return;
+      console.error(e);
+      setStatus(
+        $("mergeStatus"),
+        "Could not read source: " + (e.message || e),
+        "err"
+      );
+    }
   }
   async function loadTargetFromFile(f, handle) {
-    if (!f || !/\.pptx$/i.test(f.name)) return;
+    if (!f || !/\.pptx$/i.test(f.name || "")) return;
     setMergeTarget(f, handle);
-    var z = await JSZip.loadAsync(await readFileAsArrayBuffer(f));
-    var c = slideNames(z).length;
-    // Blank shell (0 slides) → insert at start; otherwise append after last slide
-    $("mergeInsert").value = String(c);
-    var msg =
-      c === 0
-        ? "Target: blank (0 slides) — cleaned source slides will be inserted"
-        : "Target: " + c + " slides — cleaned source slides will be inserted after #" + c;
-    msg += " (result downloads; browser cannot silently overwrite)";
-    setStatus($("mergeStatus"), msg, "ok");
+    setStatus($("mergeStatus"), "Reading target…", "ok");
+    await yieldToUI();
+    try {
+      var z = await JSZip.loadAsync(await readFileAsArrayBuffer(f), {
+        checkCRC32: false,
+      });
+      var c = slideNames(z).length;
+      // Blank shell (0 slides) → insert at start; otherwise append after last slide
+      $("mergeInsert").value = String(c);
+      var msg =
+        c === 0
+          ? "Target: blank (0 slides) — cleaned source slides will be inserted"
+          : "Target: " + c + " slides — cleaned source slides will be inserted after #" + c;
+      msg += " (result downloads; browser cannot silently overwrite)";
+      setStatus($("mergeStatus"), msg, "ok");
+    } catch (e) {
+      setStatus($("mergeStatus"), "Could not read target: " + (e.message || e), "err");
+    }
   }
 
   // Prefer File System Access for TARGET so we can overwrite the real Desktop file
@@ -641,8 +733,17 @@
    * Media renamed with _src_ prefix (same as Python). No notes cloning.
    */
   async function mergePresentations(srcFile, tgtFile, nums, insertAfter) {
-    var srcZip = await JSZip.loadAsync(await readFileAsArrayBuffer(srcFile));
-    var tgtZip = await JSZip.loadAsync(await readFileAsArrayBuffer(tgtFile));
+    // Accept File or cached ArrayBuffer (avoids a second full read of large sources)
+    var srcData =
+      srcFile instanceof ArrayBuffer
+        ? srcFile
+        : await readFileAsArrayBuffer(srcFile);
+    var tgtData =
+      tgtFile instanceof ArrayBuffer
+        ? tgtFile
+        : await readFileAsArrayBuffer(tgtFile);
+    var srcZip = await JSZip.loadAsync(srcData, { checkCRC32: false });
+    var tgtZip = await JSZip.loadAsync(tgtData, { checkCRC32: false });
     var tgtCount = slideNames(tgtZip).length;
     if (insertAfter > tgtCount) insertAfter = tgtCount;
 
@@ -1035,7 +1136,10 @@
         }
       }
 
-      var probe = await JSZip.loadAsync(await readFileAsArrayBuffer(mergeSourceFile));
+      setStatus($("mergeStatus"), "Reading source…");
+      await yieldToUI();
+      var srcBuf = await getMergeSourceBuffer();
+      var probe = await JSZip.loadAsync(srcBuf, { checkCRC32: false });
       var srcCount = slideNames(probe).length;
       if (!srcCount) throw new Error("No slides found in source file.");
 
@@ -1054,9 +1158,16 @@
       var insertAfter = parseInt(($("mergeInsert") && $("mergeInsert").value) || "0", 10);
       if (isNaN(insertAfter) || insertAfter < 0) insertAfter = 0;
 
+      setStatus(
+        $("mergeStatus"),
+        "Cleaning " + nums.length + " slide(s) + inserting into blank target…"
+      );
+      await yieldToUI();
+
       // Strip/clean source slides → insert into blank (or chosen) target
+      // Pass cached buffer so we do not re-read the multi‑MB file from disk
       var result = await mergePresentations(
-        mergeSourceFile,
+        srcBuf,
         mergeTargetFile,
         nums,
         insertAfter

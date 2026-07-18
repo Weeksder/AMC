@@ -96,14 +96,6 @@
       margin-top: 16px;
     }
     .btn-amc:active { background: #2c5282; }
-    .btn-tools {
-      background: #3d4f66;
-      color: #fff;
-      width: 100%;
-      margin-top: 10px;
-      border: 1px solid var(--border);
-    }
-    .btn-tools:hover { background: #4a5f7a; }
     .status {
       margin-top: 18px;
       min-height: 1.4em;
@@ -186,7 +178,6 @@
     </div>
 
     <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Online Class</a>
-    <a class="btn btn-tools" href="amc-studio.html">AMC Productivity Studio (full page)</a>
 
     <div class="file-input-wrap">
       <input
@@ -207,9 +198,6 @@
       Text extractor, slide merge, image strip, special strip, and text formatter
       (web version of AMC Pdf’s modification).
     </p>
-    <div class="amc-open-row">
-      <a class="btn btn-tools" href="amc-studio.html" target="_blank" rel="noopener">Open in new tab</a>
-    </div>
     <div class="amc-frame-wrap">
       <iframe
         class="amc-frame"
@@ -270,7 +258,12 @@
         }
 
         btnOpen.disabled = true;
-        setStatus("Loading “" + (file.name || "presentation") + "”…");
+        setStatus("Loading “" + (file.name || "presentation") + "”… please wait");
+
+        // Let the status text paint before heavy zip parsing freezes the main thread
+        await new Promise(function (r) {
+          setTimeout(r, 30);
+        });
 
         var pre = null;
         var apple = window.PptxNotesLoader && PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile();
