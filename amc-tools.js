@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-18h";
+  var TOOL_VERSION = "2026-07-18i";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -113,26 +113,363 @@
   }
 
   async function pickPptxWithHandle() {
+    return pickFileWithHandle(false);
+  }
+
+  /** @param {boolean} allowPdf — Source can be PPTX or PDF */
+  async function pickFileWithHandle(allowPdf) {
     if (!window.showOpenFilePicker) return null;
     try {
+      var types = [
+        {
+          description: "PowerPoint",
+          accept: {
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
+              ".pptx",
+            ],
+          },
+        },
+      ];
+      if (allowPdf) {
+        types.push({
+          description: "PDF",
+          accept: { "application/pdf": [".pdf"] },
+        });
+      }
       var handles = await window.showOpenFilePicker({
         multiple: false,
-        types: [
-          {
-            description: "PowerPoint",
-            accept: {
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
-                ".pptx",
-              ],
-            },
-          },
-        ],
+        types: types,
       });
       return handles && handles[0] ? handles[0] : null;
     } catch (e) {
       if (e && e.name === "AbortError") return null;
       return null;
     }
+  }
+
+  function isPptxName(name) {
+    return /\.pptx$/i.test(name || "");
+  }
+  function isPdfName(name) {
+    return /\.pdf$/i.test(name || "");
+  }
+  function isSourceFile(f) {
+    return f && (isPptxName(f.name) || isPdfName(f.name));
+  }
+
+  /** Lazy-load Mozilla PDF.js (renders pages as screenshots including text). */
+  var pdfJsLoadPromise = null;
+  function ensurePdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (pdfJsLoadPromise) return pdfJsLoadPromise;
+    pdfJsLoadPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js";
+      s.async = true;
+      s.onload = function () {
+        try {
+          if (!window.pdfjsLib) throw new Error("pdfjsLib not found");
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+          resolve(window.pdfjsLib);
+        } catch (e) {
+          pdfJsLoadPromise = null;
+          reject(e);
+        }
+      };
+      s.onerror = function () {
+        pdfJsLoadPromise = null;
+        reject(new Error("Could not load PDF.js (need internet once)."));
+      };
+      document.head.appendChild(s);
+    });
+    return pdfJsLoadPromise;
+  }
+
+  function canvasToJpegBytes(canvas, quality) {
+    return new Promise(function (resolve, reject) {
+      if (!canvas.toBlob) {
+        try {
+          var dataUrl = canvas.toDataURL("image/jpeg", quality || 0.92);
+          var bin = atob(dataUrl.split(",")[1]);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          resolve(bytes);
+        } catch (e) {
+          reject(e);
+        }
+        return;
+      }
+      canvas.toBlob(
+        function (blob) {
+          if (!blob) {
+            reject(new Error("Could not encode page image."));
+            return;
+          }
+          blob.arrayBuffer().then(
+            function (ab) {
+              resolve(new Uint8Array(ab));
+            },
+            reject
+          );
+        },
+        "image/jpeg",
+        quality || 0.92
+      );
+    });
+  }
+
+  /**
+   * Render selected PDF pages to JPEG bytes (full visual snapshot: graphics + text).
+   * @returns {Promise<Array<{bytes: Uint8Array, page: number}>>}
+   */
+  async function renderPdfPagesToImages(arrayBuffer, pageNums, onProgress) {
+    var pdfjsLib = await ensurePdfJs();
+    var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    var total = pdf.numPages;
+    var pages = pageNums.filter(function (n) {
+      return n >= 1 && n <= total;
+    });
+    if (!pages.length) {
+      throw new Error("No valid PDF pages. This file has " + total + " page(s).");
+    }
+
+    var out = [];
+    for (var i = 0; i < pages.length; i++) {
+      var pageNum = pages[i];
+      if (onProgress) onProgress(i + 1, pages.length, pageNum);
+      var page = await pdf.getPage(pageNum);
+      var baseVp = page.getViewport({ scale: 1 });
+      // ~1920px wide for sharp text; clamp for memory
+      var scale = 1920 / Math.max(baseVp.width, 1);
+      scale = Math.min(Math.max(scale, 1.5), 2.75);
+      var viewport = page.getViewport({ scale: scale });
+      var canvas = document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      var ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page
+        .render({
+          canvasContext: ctx,
+          viewport: viewport,
+          intent: "display",
+        })
+        .promise;
+      var bytes = await canvasToJpegBytes(canvas, 0.92);
+      // free canvas memory
+      canvas.width = 0;
+      canvas.height = 0;
+      out.push({ bytes: bytes, page: pageNum });
+      await yieldToUI();
+    }
+    return out;
+  }
+
+  function makeFullImageSlideXml(cx, cy) {
+    return (
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+      'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
+      "<p:cSld><p:spTree>" +
+      "<p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>" +
+      "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/>" +
+      "<a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>" +
+      "<p:pic>" +
+      "<p:nvPicPr><p:cNvPr id=\"2\" name=\"PDF Page\"/>" +
+      "<p:cNvPicPr><a:picLocks noChangeAspect=\"0\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>" +
+      '<p:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>' +
+      "<p:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" +
+      cx +
+      '" cy="' +
+      cy +
+      '"/></a:xfrm>' +
+      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>' +
+      "</p:pic></p:spTree></p:cSld>" +
+      "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
+    );
+  }
+
+  function makeImageSlideRels(mediaFileName) {
+    return (
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/' +
+      mediaFileName +
+      '"/>' +
+      "</Relationships>"
+    );
+  }
+
+  /**
+   * Append full-slide screenshot images into blank/target PPTX.
+   * @param {File|ArrayBuffer} tgtFile
+   * @param {Array<{bytes: Uint8Array}>} pageImages
+   * @param {number} insertAfter
+   */
+  async function mergePdfImagesIntoTarget(tgtFile, pageImages, insertAfter) {
+    if (!pageImages || !pageImages.length) {
+      throw new Error("No PDF pages rendered.");
+    }
+    var tgtData =
+      tgtFile instanceof ArrayBuffer
+        ? tgtFile
+        : await readFileAsArrayBuffer(tgtFile);
+    var tgtZip = await JSZip.loadAsync(tgtData, { checkCRC32: false });
+    var tgtCount = slideNames(tgtZip).length;
+    if (insertAfter > tgtCount) insertAfter = tgtCount;
+
+    var prsXml = await tgtZip.file("ppt/presentation.xml").async("string");
+    var cx = 12192000;
+    var cy = 6858000;
+    var sz = prsXml.match(/<p:sldSz\b[^/]*\/>/);
+    if (sz) {
+      var cxM = /cx="(\d+)"/.exec(sz[0]);
+      var cyM = /cy="(\d+)"/.exec(sz[0]);
+      if (cxM) cx = parseInt(cxM[1], 10);
+      if (cyM) cy = parseInt(cyM[1], 10);
+    }
+
+    var addedMeta = [];
+    var nextSlideNum = tgtCount + 1;
+    for (var i = 0; i < pageImages.length; i++) {
+      var newNum = nextSlideNum++;
+      var mediaName = "pdf_page_" + newNum + ".jpg";
+      var mediaPath = "ppt/media/" + mediaName;
+      var c = 1;
+      while (tgtZip.file(mediaPath)) {
+        mediaName = "pdf_page_" + newNum + "_" + c + ".jpg";
+        mediaPath = "ppt/media/" + mediaName;
+        c++;
+      }
+      tgtZip.file(mediaPath, pageImages[i].bytes);
+      tgtZip.file(
+        "ppt/slides/slide" + newNum + ".xml",
+        makeFullImageSlideXml(cx, cy)
+      );
+      tgtZip.file(
+        "ppt/slides/_rels/slide" + newNum + ".xml.rels",
+        makeImageSlideRels(mediaName)
+      );
+      addedMeta.push({ newNum: newNum });
+    }
+
+    // presentation.xml.rels
+    var prsRelsXml = await tgtZip
+      .file("ppt/_rels/presentation.xml.rels")
+      .async("string");
+    var maxRid = 0;
+    prsRelsXml.replace(/Id="rId(\d+)"/g, function (_, n) {
+      maxRid = Math.max(maxRid, parseInt(n, 10));
+      return _;
+    });
+    var relChunks = [];
+    addedMeta.forEach(function (meta, idx) {
+      meta.rid = "rId" + (maxRid + idx + 1);
+      relChunks.push(
+        '<Relationship Id="' +
+          meta.rid +
+          '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide' +
+          meta.newNum +
+          '.xml"/>'
+      );
+    });
+    prsRelsXml = prsRelsXml.replace(
+      "</Relationships>",
+      relChunks.join("") + "</Relationships>"
+    );
+    tgtZip.file("ppt/_rels/presentation.xml.rels", prsRelsXml);
+
+    // sldIdLst
+    var maxId = 255;
+    prsXml.replace(/<p:sldId\b[^>]*\bid="(\d+)"/g, function (_, n) {
+      maxId = Math.max(maxId, parseInt(n, 10));
+      return _;
+    });
+    var newSldTags = addedMeta.map(function (meta, idx) {
+      meta.id = maxId + idx + 1;
+      return '<p:sldId id="' + meta.id + '" r:id="' + meta.rid + '"/>';
+    });
+    var existingTags = [];
+    prsXml.replace(/<p:sldId\b[^/]*\/>/g, function (tag) {
+      existingTags.push(tag);
+      return tag;
+    });
+    var ordered;
+    if (insertAfter < tgtCount && existingTags.length) {
+      ordered = existingTags
+        .slice(0, insertAfter)
+        .concat(newSldTags)
+        .concat(existingTags.slice(insertAfter));
+    } else {
+      ordered = existingTags.concat(newSldTags);
+    }
+    var newList = "<p:sldIdLst>" + ordered.join("") + "</p:sldIdLst>";
+    if (/<p:sldIdLst\s*\/>/.test(prsXml)) {
+      prsXml = prsXml.replace(/<p:sldIdLst\s*\/>/, newList);
+    } else if (/<p:sldIdLst[\s>][\s\S]*?<\/p:sldIdLst>/.test(prsXml)) {
+      prsXml = prsXml.replace(/<p:sldIdLst[\s>][\s\S]*?<\/p:sldIdLst>/, newList);
+    } else if (/<\/p:sldMasterIdLst>/.test(prsXml)) {
+      prsXml = prsXml.replace(
+        /<\/p:sldMasterIdLst>/,
+        "</p:sldMasterIdLst>" + newList
+      );
+    } else {
+      throw new Error("Could not insert sldIdLst into presentation.xml");
+    }
+    if (prsXml.indexOf("<?xml") !== 0) {
+      prsXml =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + prsXml;
+    }
+    tgtZip.file("ppt/presentation.xml", prsXml);
+
+    // Content_Types
+    var ctXml = await tgtZip.file("[Content_Types].xml").async("string");
+    if (!/Extension="jpeg"/i.test(ctXml) && !/Extension="jpg"/i.test(ctXml)) {
+      ctXml = ctXml.replace(
+        "</Types>",
+        '<Default Extension="jpeg" ContentType="image/jpeg"/></Types>'
+      );
+    }
+    if (!/Extension="jpg"/i.test(ctXml)) {
+      ctXml = ctXml.replace(
+        "</Types>",
+        '<Default Extension="jpg" ContentType="image/jpeg"/></Types>'
+      );
+    }
+    var ctAdds = [];
+    addedMeta.forEach(function (meta) {
+      var part = "/ppt/slides/slide" + meta.newNum + ".xml";
+      if (ctXml.indexOf('PartName="' + part + '"') < 0) {
+        ctAdds.push(
+          '<Override PartName="' +
+            part +
+            '" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+        );
+      }
+    });
+    if (ctAdds.length) {
+      ctXml = ctXml.replace("</Types>", ctAdds.join("") + "</Types>");
+    }
+    tgtZip.file("[Content_Types].xml", ctXml);
+
+    var ab = await tgtZip.generateAsync({
+      type: "arraybuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    });
+    if (!ab || ab.byteLength < 2000) {
+      throw new Error("Output file was empty — PDF merge failed.");
+    }
+    return {
+      blob: new Blob([ab], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      }),
+      count: addedMeta.length,
+    };
   }
 
   function wireDrop(zone, input, onFiles, opts) {
@@ -321,35 +658,58 @@
   }
 
   /**
-   * Instant UI feedback, then count slides in the background so the page
-   * does not freeze while a multi‑MB PPTX is parsed.
+   * Instant UI feedback, then count slides/pages in the background so the page
+   * does not freeze while a multi‑MB PPTX/PDF is parsed.
    */
   async function loadSourceFromFile(f) {
-    if (!f || !/\.pptx$/i.test(f.name || "")) return;
+    if (!isSourceFile(f)) return;
     var loadId = ++mergeSourceLoadId;
     setMergeSource(f);
     if ($("mergeSlides")) {
       $("mergeSlides").value = "";
-      $("mergeSlides").placeholder = "counting slides…";
+      $("mergeSlides").placeholder = isPdfName(f.name)
+        ? "counting pages…"
+        : "counting slides…";
     }
     setStatus(
       $("mergeStatus"),
-      "Source selected: " + f.name + " — counting slides…",
+      "Source selected: " +
+        f.name +
+        (isPdfName(f.name)
+          ? " — counting PDF pages…"
+          : " — counting slides…"),
       "ok"
     );
-    // Paint label/status before JSZip blocks the main thread
     await yieldToUI();
     await yieldToUI();
     try {
       var buf = await readFileAsArrayBuffer(f);
-      if (loadId !== mergeSourceLoadId) return; // user picked another file
+      if (loadId !== mergeSourceLoadId) return;
       mergeSourceBuf = buf;
       await yieldToUI();
-      var z = await JSZip.loadAsync(buf, { checkCRC32: false });
-      if (loadId !== mergeSourceLoadId) return;
-      var c = slideNames(z).length;
+
+      var c = 0;
+      if (isPdfName(f.name)) {
+        var pdfjsLib = await ensurePdfJs();
+        if (loadId !== mergeSourceLoadId) return;
+        // slice() so PDF.js cannot detach the cached buffer
+        var pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+        if (loadId !== mergeSourceLoadId) return;
+        c = pdf.numPages || 0;
+      } else {
+        var z = await JSZip.loadAsync(buf, { checkCRC32: false });
+        if (loadId !== mergeSourceLoadId) return;
+        c = slideNames(z).length;
+      }
+
       if (!c) {
-        setStatus($("mergeStatus"), "Source has 0 slides — pick a different PPTX.", "err");
+        setStatus(
+          $("mergeStatus"),
+          isPdfName(f.name)
+            ? "Source PDF has 0 pages — pick a different file."
+            : "Source has 0 slides — pick a different PPTX.",
+          "err"
+        );
         return;
       }
       if ($("mergeSlides")) {
@@ -358,7 +718,11 @@
       }
       setStatus(
         $("mergeStatus"),
-        "Source: " + c + " slides — ready to Extract into blank target.",
+        isPdfName(f.name)
+          ? "Source PDF: " +
+              c +
+              " page(s) — Extract renders each page as a slide image into blank target."
+          : "Source: " + c + " slides — ready to Extract into blank target.",
         "ok"
       );
     } catch (e) {
@@ -412,7 +776,7 @@
     if (e.target && e.target.tagName === "INPUT") return;
     e.preventDefault();
     e.stopPropagation();
-    var handle = await pickPptxWithHandle();
+    var handle = await pickFileWithHandle(true);
     if (handle) {
       var file = await handle.getFile();
       await loadSourceFromFile(file);
@@ -1113,13 +1477,22 @@
     return false;
   }
 
+  function makeEditOutName(srcName) {
+    var base = (srcName || "slides")
+      .replace(/\.pptx$/i, "")
+      .replace(/\.pdf$/i, "");
+    base = base.replace(/_extracted_[\d\-T:.]+$/i, "");
+    base = base.replace(/_EDIT$/i, "");
+    return base + "_EDIT.pptx";
+  }
+
   /**
-   * Shared extract path used by both buttons.
+   * Shared extract path used by both buttons (PPTX slides or PDF pages → blank PPTX).
    * @returns {{ blob: Blob, count: number, outName: string }}
    */
   async function runExtractSlides() {
     if (!mergeSourceFile) {
-      throw new Error("Choose a Source PPTX file first.");
+      throw new Error("Choose a Source PPTX or PDF file first.");
     }
     if (typeof JSZip === "undefined") {
       throw new Error("JSZip missing.");
@@ -1136,9 +1509,21 @@
     setStatus($("mergeStatus"), "Reading source…");
     await yieldToUI();
     var srcBuf = await getMergeSourceBuffer();
-    var probe = await JSZip.loadAsync(srcBuf, { checkCRC32: false });
-    var srcCount = slideNames(probe).length;
-    if (!srcCount) throw new Error("No slides found in source file.");
+    var sourceIsPdf = isPdfName(mergeSourceFile.name);
+    var srcCount = 0;
+
+    if (sourceIsPdf) {
+      var pdfjsLib = await ensurePdfJs();
+      var pdfDoc = await pdfjsLib
+        .getDocument({ data: srcBuf.slice(0) })
+        .promise;
+      srcCount = pdfDoc.numPages || 0;
+      if (!srcCount) throw new Error("No pages found in PDF.");
+    } else {
+      var probe = await JSZip.loadAsync(srcBuf, { checkCRC32: false });
+      srcCount = slideNames(probe).length;
+      if (!srcCount) throw new Error("No slides found in source file.");
+    }
 
     var rawList = ($("mergeSlides") && $("mergeSlides").value) || "";
     if (!String(rawList).trim()) {
@@ -1148,9 +1533,11 @@
     var nums = parseSlideList(rawList, srcCount);
     if (!nums.length) {
       throw new Error(
-        "No valid slide numbers. This source has " +
+        "No valid " +
+          (sourceIsPdf ? "page" : "slide") +
+          " numbers. This source has " +
           srcCount +
-          " slides (try 1-" +
+          " (try 1-" +
           srcCount +
           ")."
       );
@@ -1159,25 +1546,58 @@
     var insertAfter = parseInt(($("mergeInsert") && $("mergeInsert").value) || "0", 10);
     if (isNaN(insertAfter) || insertAfter < 0) insertAfter = 0;
 
-    setStatus(
-      $("mergeStatus"),
-      "Cleaning " + nums.length + " slide(s) + inserting into blank target…"
-    );
-    await yieldToUI();
+    var result;
+    if (sourceIsPdf) {
+      setStatus(
+        $("mergeStatus"),
+        "Rendering PDF pages as images (includes text overlays)…"
+      );
+      await yieldToUI();
+      var images = await renderPdfPagesToImages(
+        srcBuf.slice(0),
+        nums,
+        function (done, total, pageNum) {
+          setStatus(
+            $("mergeStatus"),
+            "Rendering PDF page " +
+              pageNum +
+              " (" +
+              done +
+              "/" +
+              total +
+              ")…"
+          );
+        }
+      );
+      setStatus(
+        $("mergeStatus"),
+        "Inserting " + images.length + " page image(s) into blank target…"
+      );
+      await yieldToUI();
+      result = await mergePdfImagesIntoTarget(
+        mergeTargetFile,
+        images,
+        insertAfter
+      );
+    } else {
+      setStatus(
+        $("mergeStatus"),
+        "Cleaning " + nums.length + " slide(s) + inserting into blank target…"
+      );
+      await yieldToUI();
+      result = await mergePresentations(
+        srcBuf,
+        mergeTargetFile,
+        nums,
+        insertAfter
+      );
+    }
 
-    var result = await mergePresentations(
-      srcBuf,
-      mergeTargetFile,
-      nums,
-      insertAfter
-    );
-
-    var base = (mergeSourceFile.name || "slides").replace(/\.pptx$/i, "");
-    base = base.replace(/_extracted_[\d\-T:.]+$/i, "");
-    base = base.replace(/_EDIT$/i, "");
-    var outName = base + "_EDIT.pptx";
-
-    return { blob: result.blob, count: result.count, outName: outName };
+    return {
+      blob: result.blob,
+      count: result.count,
+      outName: makeEditOutName(mergeSourceFile.name),
+    };
   }
 
   function setMergeButtonsDisabled(disabled) {
@@ -1197,7 +1617,7 @@
           result.outName +
           "” (" +
           result.count +
-          " slides cleaned + put into blank target). Check Downloads.",
+          " slide(s) into blank target). Check Downloads.",
         "ok"
       );
     } catch (e) {

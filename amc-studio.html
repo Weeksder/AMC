@@ -49,16 +49,16 @@
     <section class="panel active" id="panel-merge">
       <h2>PowerPoint Slide Extractor</h2>
       <p class="hint">
-        Original desktop workflow: take slides from <strong>Source</strong>,
-        <strong>strip watermarks / clean Source-Note boxes</strong>, insert into a
-        <strong>blank Target</strong> (preloaded <code>blank-target.pptx</code>, 0 slides).
-        Downloads <code>SourceName_EDIT.pptx</code> — no empty first page, pictures kept.
+        <strong>PPTX source:</strong> clean slides → blank target (same as desktop).<br>
+        <strong>PDF source:</strong> each page is screenshot-rendered (image + text overlay)
+        into a full slide on the blank target.<br>
+        Blue button downloads <code>SourceName_EDIT.pptx</code>; red opens Notes Viewer (no download).
       </p>
       <div class="grid2">
         <div class="drop" id="mergeSourceDrop">
-          <strong>Source PPTX</strong>
+          <strong>Source PPTX or PDF</strong>
           <span id="mergeSourceLabel">Drop or click</span>
-          <input type="file" id="mergeSource" accept=".pptx" hidden>
+          <input type="file" id="mergeSource" accept=".pptx,.pdf,application/pdf" hidden>
         </div>
         <div class="drop" id="mergeTargetDrop">
           <strong>Target PPTX</strong>
@@ -67,7 +67,7 @@
         </div>
       </div>
       <div class="fields">
-        <label>Slides to extract <small>(e.g. 1-19 or 1,3,5)</small>
+        <label>Slides / PDF pages <small>(e.g. 1-19 or 1,3,5)</small>
           <input type="text" id="mergeSlides" placeholder="1-10">
         </label>
         <label>Insert after slide # in target <small>(0 = start; blank target uses 0)</small>
@@ -161,10 +161,10 @@
     Screen-snipping is not available in the browser — upload or paste an image instead. Files stay on your device.
   </footer>
 
-  <script src="jszip.min.js?v=20260718h"></script>
-  <script src="blank-target-data.js?v=20260718h"></script>
-  <script src="pptx-loader.js?v=20260718h"></script>
-  <!-- Tesseract loads only when you use Text Extractor (keeps page responsive) -->
-  <script src="amc-tools.js?v=20260718h"></script>
+  <script src="jszip.min.js?v=20260718i"></script>
+  <script src="blank-target-data.js?v=20260718i"></script>
+  <script src="pptx-loader.js?v=20260718i"></script>
+  <!-- PDF.js + Tesseract load on demand -->
+  <script src="amc-tools.js?v=20260718i"></script>
 </body>
 </html>
