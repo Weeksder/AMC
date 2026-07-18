@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-18e";
+  var TOOL_VERSION = "2026-07-18g";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -1113,77 +1113,88 @@
     return false;
   }
 
-  $("mergeGo").addEventListener("click", async function () {
+  /**
+   * Shared extract path used by both buttons.
+   * @returns {{ blob: Blob, count: number, outName: string }}
+   */
+  async function runExtractSlides() {
     if (!mergeSourceFile) {
-      setStatus($("mergeStatus"), "Choose a Source PPTX file first.", "err");
-      return;
+      throw new Error("Choose a Source PPTX file first.");
     }
     if (typeof JSZip === "undefined") {
-      setStatus($("mergeStatus"), "JSZip missing.", "err");
-      return;
+      throw new Error("JSZip missing.");
     }
-    var btn = $("mergeGo");
-    btn.disabled = true;
-    setStatus($("mergeStatus"), "Cleaning + inserting into blank target…");
-    try {
-      // Original success path: always have a target (built-in blank if none chosen)
-      if (!mergeTargetFile) {
-        var ok = await ensureBlankTarget();
-        if (!ok || !mergeTargetFile) {
-          throw new Error(
-            "No blank target. Upload blank-target.pptx next to amc-studio.html on GitHub, or click Target and pick a blank .pptx."
-          );
-        }
-      }
-
-      setStatus($("mergeStatus"), "Reading source…");
-      await yieldToUI();
-      var srcBuf = await getMergeSourceBuffer();
-      var probe = await JSZip.loadAsync(srcBuf, { checkCRC32: false });
-      var srcCount = slideNames(probe).length;
-      if (!srcCount) throw new Error("No slides found in source file.");
-
-      var rawList = ($("mergeSlides") && $("mergeSlides").value) || "";
-      if (!String(rawList).trim()) {
-        rawList = "1-" + srcCount;
-        if ($("mergeSlides")) $("mergeSlides").value = rawList;
-      }
-      var nums = parseSlideList(rawList, srcCount);
-      if (!nums.length) {
+    if (!mergeTargetFile) {
+      var ok = await ensureBlankTarget();
+      if (!ok || !mergeTargetFile) {
         throw new Error(
-          "No valid slide numbers. This source has " + srcCount + " slides (try 1-" + srcCount + ")."
+          "No blank target. Upload blank-target.pptx next to amc-studio.html, or click Target and pick a blank .pptx."
         );
       }
+    }
 
-      var insertAfter = parseInt(($("mergeInsert") && $("mergeInsert").value) || "0", 10);
-      if (isNaN(insertAfter) || insertAfter < 0) insertAfter = 0;
+    setStatus($("mergeStatus"), "Reading source…");
+    await yieldToUI();
+    var srcBuf = await getMergeSourceBuffer();
+    var probe = await JSZip.loadAsync(srcBuf, { checkCRC32: false });
+    var srcCount = slideNames(probe).length;
+    if (!srcCount) throw new Error("No slides found in source file.");
 
-      setStatus(
-        $("mergeStatus"),
-        "Cleaning " + nums.length + " slide(s) + inserting into blank target…"
+    var rawList = ($("mergeSlides") && $("mergeSlides").value) || "";
+    if (!String(rawList).trim()) {
+      rawList = "1-" + srcCount;
+      if ($("mergeSlides")) $("mergeSlides").value = rawList;
+    }
+    var nums = parseSlideList(rawList, srcCount);
+    if (!nums.length) {
+      throw new Error(
+        "No valid slide numbers. This source has " +
+          srcCount +
+          " slides (try 1-" +
+          srcCount +
+          ")."
       );
-      await yieldToUI();
+    }
 
-      // Strip/clean source slides → insert into blank (or chosen) target
-      // Pass cached buffer so we do not re-read the multi‑MB file from disk
-      var result = await mergePresentations(
-        srcBuf,
-        mergeTargetFile,
-        nums,
-        insertAfter
-      );
+    var insertAfter = parseInt(($("mergeInsert") && $("mergeInsert").value) || "0", 10);
+    if (isNaN(insertAfter) || insertAfter < 0) insertAfter = 0;
 
-      // Always download a NEW name (Brave/Edge: no silent overwrite of the target path)
-      var base = (mergeSourceFile.name || "slides").replace(/\.pptx$/i, "");
-      // Drop prior extract / edit suffixes so we always end cleanly with _EDIT
-      base = base.replace(/_extracted_[\d\-T:.]+$/i, "");
-      base = base.replace(/_EDIT$/i, "");
-      var outName = base + "_EDIT.pptx";
-      downloadBlob(result.blob, outName);
+    setStatus(
+      $("mergeStatus"),
+      "Cleaning " + nums.length + " slide(s) + inserting into blank target…"
+    );
+    await yieldToUI();
+
+    var result = await mergePresentations(
+      srcBuf,
+      mergeTargetFile,
+      nums,
+      insertAfter
+    );
+
+    var base = (mergeSourceFile.name || "slides").replace(/\.pptx$/i, "");
+    base = base.replace(/_extracted_[\d\-T:.]+$/i, "");
+    base = base.replace(/_EDIT$/i, "");
+    var outName = base + "_EDIT.pptx";
+
+    return { blob: result.blob, count: result.count, outName: outName };
+  }
+
+  function setMergeButtonsDisabled(disabled) {
+    if ($("mergeGo")) $("mergeGo").disabled = disabled;
+    if ($("mergeGoViewer")) $("mergeGoViewer").disabled = disabled;
+  }
+
+  $("mergeGo").addEventListener("click", async function () {
+    setMergeButtonsDisabled(true);
+    setStatus($("mergeStatus"), "Cleaning + inserting into blank target…");
+    try {
+      var result = await runExtractSlides();
+      downloadBlob(result.blob, result.outName);
       setStatus(
         $("mergeStatus"),
         "Downloaded “" +
-          outName +
+          result.outName +
           "” (" +
           result.count +
           " slides cleaned + put into blank target). Check Downloads.",
@@ -1193,8 +1204,70 @@
       console.error(e);
       setStatus($("mergeStatus"), "Error: " + (e.message || e), "err");
     }
-    btn.disabled = false;
+    setMergeButtonsDisabled(false);
   });
+
+  // Red button: extract → download → open Notes Viewer
+  if ($("mergeGoViewer")) {
+    $("mergeGoViewer").addEventListener("click", async function () {
+      setMergeButtonsDisabled(true);
+      setStatus($("mergeStatus"), "Extracting, then opening Notes Viewer…");
+
+      // Open placeholder tab immediately while we still have the click gesture
+      var pre = null;
+      try {
+        if (window.PptxNotesLoader && PptxNotesLoader.openPlaceholderTab) {
+          pre = PptxNotesLoader.openPlaceholderTab();
+        }
+      } catch (e) {
+        pre = null;
+      }
+
+      try {
+        var result = await runExtractSlides();
+        downloadBlob(result.blob, result.outName);
+
+        var file = new File([result.blob], result.outName, {
+          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        });
+
+        if (!window.PptxNotesLoader || !PptxNotesLoader.openPptxInNewTab) {
+          throw new Error(
+            "Notes Viewer loader missing — re-upload pptx-loader.js next to amc-studio.html."
+          );
+        }
+
+        setStatus($("mergeStatus"), "Opening Notes Viewer with “" + result.outName + "”…");
+        await yieldToUI();
+
+        var opened = await PptxNotesLoader.openPptxInNewTab(file, "viewer.html", {
+          preOpenedWindow: pre,
+          sameTabFallback: true,
+          forceNewTab: true,
+        });
+
+        setStatus(
+          $("mergeStatus"),
+          "Downloaded “" +
+            result.outName +
+            "” (" +
+            result.count +
+            " slides) and opened Notes Viewer" +
+            (opened && opened.mode === "same-tab" ? " (this tab)." : "."),
+          "ok"
+        );
+      } catch (e) {
+        console.error(e);
+        if (pre && !pre.closed) {
+          try {
+            pre.close();
+          } catch (err) {}
+        }
+        setStatus($("mergeStatus"), "Error: " + (e.message || e), "err");
+      }
+      setMergeButtonsDisabled(false);
+    });
+  }
 
   // Preload built-in blank target (0-slide shell) — original desktop workflow
   if ($("mergeStatus")) {
@@ -1242,23 +1315,102 @@
     setStatus($("stripStatus"), "Cleared.");
   });
 
+  /**
+   * Thorough image strip (string-based — no DOM corruption):
+   * 1) Remove all picture shapes (p:pic)
+   * 2) Clear background image fills (p:bg with blipFill) — e.g. full-slide photos
+   * 3) Replace solid/gradient slide backgrounds with white (avoids dark leftover pages)
+   * 4) Remove picture fills on shapes (a:blipFill → noFill)
+   */
+  function stripImagesFromSlideXml(xml) {
+    if (!xml) return xml;
+
+    // 1) Picture shapes (loop in case of nesting / multiple)
+    var prev;
+    do {
+      prev = xml;
+      xml = xml.replace(/<[a-zA-Z0-9]+:pic\b[\s\S]*?<\/[a-zA-Z0-9]+:pic>/g, "");
+      xml = xml.replace(/<pic\b[\s\S]*?<\/pic>/g, "");
+    } while (xml !== prev);
+
+    // 2–3) Slide backgrounds: image OR colored solid/gradient → plain white
+    // (slide 16 in AMC decks often uses dark schemeClr accent after the photo is gone)
+    xml = xml.replace(/<p:bg\b[\s\S]*?<\/p:bg>/g, function (bg) {
+      if (
+        /blipFill|a:blip\b|solidFill|gradFill|pattFill/i.test(bg)
+      ) {
+        return (
+          "<p:bg><p:bgPr>" +
+          '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>' +
+          "<a:effectLst/></p:bgPr></p:bg>"
+        );
+      }
+      return bg;
+    });
+
+    // 4) Picture-as-shape-fill (and any leftover blip fills not inside bg we already rewrote)
+    do {
+      prev = xml;
+      xml = xml.replace(/<a:blipFill\b[\s\S]*?<\/a:blipFill>/g, "<a:noFill/>");
+    } while (xml !== prev);
+
+    // Self-closing / rare forms
+    xml = xml.replace(/<a:blipFill\b[^>]*\/>/g, "<a:noFill/>");
+
+    return xml;
+  }
+
+  /** Drop image relationships from a slide .rels so PowerPoint does not look for missing media. */
+  function stripImageRels(relsXml) {
+    if (!relsXml) return relsXml;
+    relsXml = relsXml.replace(
+      /<Relationship\b[^>]*Type="[^"]*\/image"[^>]*\/>/gi,
+      ""
+    );
+    relsXml = relsXml.replace(
+      /<Relationship\b[^>]*Type="[^"]*\/image"[^>]*>[\s\S]*?<\/Relationship>/gi,
+      ""
+    );
+    return relsXml;
+  }
+
   async function stripImagesFromFile(file) {
-    var zip = await JSZip.loadAsync(file);
+    var zip = await JSZip.loadAsync(await readFileAsArrayBuffer(file), {
+      checkCRC32: false,
+    });
     var slides = slideNames(zip);
     for (var i = 0; i < slides.length; i++) {
       var path = slides[i];
       var xml = await zip.file(path).async("string");
-      var doc = new DOMParser().parseFromString(xml, "application/xml");
-      var pics = localAll(doc, "pic");
-      pics.forEach(function (pic) {
-        var parent = pic.parentNode;
-        if (parent) parent.removeChild(pic);
-      });
-      zip.file(path, new XMLSerializer().serializeToString(doc));
+      xml = stripImagesFromSlideXml(xml);
+      if (xml.indexOf("<?xml") !== 0) {
+        xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
+      }
+      zip.file(path, xml);
+
+      // Clean slide relationships that pointed at images
+      var base = path.split("/").pop();
+      var relsPath = "ppt/slides/_rels/" + base + ".rels";
+      if (zip.file(relsPath)) {
+        var rels = await zip.file(relsPath).async("string");
+        zip.file(relsPath, stripImageRels(rels));
+      }
     }
-    return zip.generateAsync({
-      type: "blob",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+
+    // Remove media parts (images) — optional size win; slides no longer reference them
+    Object.keys(zip.files).forEach(function (n) {
+      if (n.indexOf("ppt/media/") === 0 && !zip.files[n].dir) {
+        zip.remove(n);
+      }
+    });
+
+    var ab = await zip.generateAsync({
+      type: "arraybuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    });
+    return new Blob([ab], {
+      type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     });
   }
 
