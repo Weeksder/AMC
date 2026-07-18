@@ -326,50 +326,125 @@
     { skipClick: true }
   );
 
+  function readFileAsArrayBuffer(file) {
+    if (file.arrayBuffer) return file.arrayBuffer();
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () {
+        resolve(fr.result);
+      };
+      fr.onerror = function () {
+        reject(fr.error || new Error("Could not read file"));
+      };
+      fr.readAsArrayBuffer(file);
+    });
+  }
+
+  function eachRelationship(relsXml, fn) {
+    // Self-closing and paired tags
+    relsXml.replace(/<Relationship\b[^>]*\/>/g, function (tag) {
+      fn(tag);
+      return tag;
+    });
+    relsXml.replace(/<Relationship\b[^>]*>[\s\S]*?<\/Relationship>/g, function (tag) {
+      fn(tag);
+      return tag;
+    });
+  }
+
+  function isSlideRelationship(tag) {
+    // Type must be .../relationships/slide  (not slideMaster / slideLayout / notesSlide)
+    var typeM = /Type="([^"]+)"/.exec(tag);
+    if (!typeM) return false;
+    var t = typeM[1];
+    return /\/relationships\/slide$/.test(t);
+  }
+
+  function normalizeSlidePath(target) {
+    var path = String(target || "").replace(/\\/g, "/").replace(/^\//, "");
+    if (path.indexOf("ppt/") === 0) return path;
+    if (path.indexOf("slides/") === 0) return "ppt/" + path;
+    if (path.indexOf("../") === 0) return "ppt/" + path.replace(/^(\.\.\/)+/, "");
+    return "ppt/" + path;
+  }
+
   /**
    * Extract selected slides from SOURCE into a new PPTX.
-   * Keeps original media paths (no rename) so pictures always work.
-   * Does not use blank-target for content — blank was only a shell and caused empty/broken files.
+   * Clones the source package and keeps only chosen slides — media paths untouched.
    */
   async function extractSlidesFromSource(srcFile, nums) {
-    var zip = await JSZip.loadAsync(await srcFile.arrayBuffer());
-    var prsXml = await zip.file("ppt/presentation.xml").async("string");
-    var prsRels = await zip.file("ppt/_rels/presentation.xml.rels").async("string");
+    var buf = await readFileAsArrayBuffer(srcFile);
+    var zip = await JSZip.loadAsync(buf);
 
-    // rId -> slides/slideN.xml
+    var prsFile = zip.file("ppt/presentation.xml");
+    var relsFile = zip.file("ppt/_rels/presentation.xml.rels");
+    if (!prsFile || !relsFile) {
+      throw new Error("Not a valid .pptx (missing presentation.xml).");
+    }
+
+    var prsXml = await prsFile.async("string");
+    var prsRels = await relsFile.async("string");
+
+    // rId -> ppt/slides/slideN.xml
     var ridToTarget = {};
-    prsRels.replace(/<Relationship\b[^>]*\/>/g, function (tag) {
-      // exact slide relationship (not master/layout/notes)
-      if (tag.indexOf("/relationships/slide\"") < 0) return;
-      if (/slideMaster|slideLayout|notesSlide/i.test(tag)) return;
+    eachRelationship(prsRels, function (tag) {
+      if (!isSlideRelationship(tag)) return;
       var idM = /Id="([^"]+)"/.exec(tag);
       var tM = /Target="([^"]+)"/.exec(tag);
-      if (idM && tM) {
-        var t = tM[1].replace(/\\/g, "/");
-        ridToTarget[idM[1]] = t;
-      }
+      if (idM && tM) ridToTarget[idM[1]] = normalizeSlidePath(tM[1]);
     });
 
-    // Document order of slides
+    // Document order of slides (self-closing or paired sldId)
     var order = [];
-    prsXml.replace(/<p:sldId\b[^/]*\/>/g, function (tag) {
-      var ridM = /r:id="([^"]+)"/.exec(tag);
+    function pushSldId(tag) {
+      var ridM = /r:id="([^"]+)"/.exec(tag) || /r:id='([^']+)'/.exec(tag);
       if (!ridM) return;
       var rid = ridM[1];
-      var target = ridToTarget[rid];
-      if (!target) return;
-      var path = target;
-      if (path.indexOf("ppt/") !== 0) {
-        path = path.replace(/^\//, "");
-        if (path.indexOf("slides/") === 0) path = "ppt/" + path;
-        else if (path.indexOf("../") === 0) path = "ppt/" + path.replace(/^\.\.\//, "");
-        else path = "ppt/" + path;
+      var path = ridToTarget[rid];
+      if (!path) return;
+      // Prefer actual zip path if case differs
+      if (!zip.file(path)) {
+        var alt = slideNames(zip).find(function (p) {
+          return p.toLowerCase() === path.toLowerCase();
+        });
+        if (alt) path = alt;
       }
-      order.push({ rid: rid, path: path, tag: tag });
+      if (!zip.file(path)) return;
+      order.push({ rid: rid, path: path });
+    }
+    prsXml.replace(/<p:sldId\b[^/]*\/>/g, function (tag) {
+      pushSldId(tag);
+      return tag;
+    });
+    prsXml.replace(/<p:sldId\b[^>]*>[\s\S]*?<\/p:sldId>/g, function (tag) {
+      pushSldId(tag);
+      return tag;
     });
 
+    // Fallback: match slide files to relationship targets by path
     if (!order.length) {
-      throw new Error("Could not read slide list from this PowerPoint.");
+      var files = slideNames(zip);
+      if (!files.length) throw new Error("No slides found inside this PowerPoint.");
+      var pathToRid = {};
+      Object.keys(ridToTarget).forEach(function (rid) {
+        var p = ridToTarget[rid];
+        pathToRid[p] = rid;
+        pathToRid[normalizeSlidePath(p)] = rid;
+        pathToRid[p.replace(/^ppt\//, "")] = rid;
+      });
+      files.forEach(function (path) {
+        var rid =
+          pathToRid[path] ||
+          pathToRid[path.replace(/^ppt\//, "")] ||
+          pathToRid["slides/" + path.split("/").pop()];
+        if (rid) order.push({ rid: rid, path: path });
+      });
+    }
+
+    if (!order.length) {
+      throw new Error(
+        "Could not read slide list from this PowerPoint (relationships/sldIdLst)."
+      );
     }
 
     var selected = [];
@@ -378,7 +453,11 @@
     });
     if (!selected.length) {
       throw new Error(
-        "No slides matched. This file has " + order.length + " slides. Check the slide numbers."
+        "No slides matched. This file has " +
+          order.length +
+          " slides. Try 1-" +
+          order.length +
+          "."
       );
     }
 
@@ -387,50 +466,65 @@
     selected.forEach(function (e) {
       keepRid[e.rid] = true;
       keepSlidePath[e.path] = true;
+      // also basename match
+      keepSlidePath[e.path.split("/").pop()] = true;
     });
 
-    // Rebuild sldIdLst — same r:ids, only selected slides, new sequential ids
+    // Rebuild sldIdLst
     var newTags = selected.map(function (e, i) {
       return '<p:sldId id="' + (256 + i) + '" r:id="' + e.rid + '"/>';
     });
     var newList = "<p:sldIdLst>" + newTags.join("") + "</p:sldIdLst>";
     if (/<p:sldIdLst\/>/.test(prsXml)) {
       prsXml = prsXml.replace(/<p:sldIdLst\/>/, newList);
-    } else if (/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/.test(prsXml)) {
-      prsXml = prsXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, newList);
+    } else if (/<p:sldIdLst[\s>][\s\S]*?<\/p:sldIdLst>/.test(prsXml)) {
+      prsXml = prsXml.replace(/<p:sldIdLst[\s>][\s\S]*?<\/p:sldIdLst>/, newList);
+    } else if (/<\/p:sldMasterIdLst>/.test(prsXml)) {
+      prsXml = prsXml.replace(/<\/p:sldMasterIdLst>/, "</p:sldMasterIdLst>" + newList);
     } else {
       throw new Error("presentation.xml has no sldIdLst — cannot extract.");
     }
     zip.file("ppt/presentation.xml", prsXml);
 
-    // Drop slide relationships not selected
-    prsRels = prsRels.replace(/<Relationship\b[^>]*\/>/g, function (tag) {
-      if (tag.indexOf("/relationships/slide\"") < 0) return tag;
-      if (/slideMaster|slideLayout|notesSlide/i.test(tag)) return tag;
+    // Filter presentation relationships (handle /> and ></Relationship>)
+    function filterRelTag(tag) {
+      if (!isSlideRelationship(tag)) return tag;
       var idM = /Id="([^"]+)"/.exec(tag);
       if (idM && !keepRid[idM[1]]) return "";
       return tag;
-    });
+    }
+    prsRels = prsRels.replace(/<Relationship\b[^>]*\/>/g, filterRelTag);
+    prsRels = prsRels.replace(/<Relationship\b[^>]*>[\s\S]*?<\/Relationship>/g, filterRelTag);
     zip.file("ppt/_rels/presentation.xml.rels", prsRels);
 
-    // Remove slide parts not kept (and their rels)
+    // Remove slide parts not kept
     slideNames(zip).forEach(function (path) {
-      if (keepSlidePath[path]) return;
+      var base = path.split("/").pop();
+      if (keepSlidePath[path] || keepSlidePath[base]) return;
       zip.remove(path);
-      var relsPath = "ppt/slides/_rels/" + path.split("/").pop() + ".rels";
+      var relsPath = "ppt/slides/_rels/" + base + ".rels";
       if (zip.file(relsPath)) zip.remove(relsPath);
     });
 
-    // Content types: remove overrides for deleted slides
+    // Verify kept slides still exist
+    var kept = 0;
+    selected.forEach(function (e) {
+      if (zip.file(e.path)) kept++;
+    });
+    if (kept === 0) {
+      throw new Error("Internal error: all slides were removed. Please try again or report this file.");
+    }
+
+    // Content types: drop overrides for removed slides
     var ctXml = await zip.file("[Content_Types].xml").async("string");
     ctXml = ctXml.replace(
       /<Override\b[^>]*PartName="\/ppt\/slides\/slide\d+\.xml"[^>]*\/>/g,
       function (tag) {
-        var m = /PartName="(\/ppt\/slides\/slide\d+\.xml)"/.exec(tag);
+        var m = /PartName="\/ppt\/slides\/(slide\d+\.xml)"/.exec(tag);
         if (!m) return tag;
-        // keep if path without leading slash is kept
-        var p = m[1].replace(/^\//, "");
-        return keepSlidePath[p] ? tag : "";
+        var base = m[1];
+        var full = "ppt/slides/" + base;
+        return keepSlidePath[full] || keepSlidePath[base] ? tag : "";
       }
     );
     zip.file("[Content_Types].xml", ctXml);
@@ -440,7 +534,15 @@
       mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       compression: "DEFLATE",
     });
-    return { blob: blob, count: selected.length };
+    if (!blob || blob.size < 2000) {
+      throw new Error("Output file was empty — extraction failed.");
+    }
+    return { blob: blob, count: selected.length, totalInSource: order.length };
+  }
+
+  function pathSlideNum(path) {
+    var m = String(path).match(/slide(\d+)\.xml$/i);
+    return m ? m[1] : "1";
   }
 
   /**
@@ -798,34 +900,42 @@
     }
     var btn = $("mergeGo");
     btn.disabled = true;
-    setStatus($("mergeStatus"), "Extracting slides (keeping original pictures)…");
+    setStatus($("mergeStatus"), "Extracting slides…");
     try {
-      var srcZip = await JSZip.loadAsync(mergeSourceFile);
-      var srcCount = slideNames(srcZip).length;
+      var probe = await JSZip.loadAsync(await readFileAsArrayBuffer(mergeSourceFile));
+      var srcCount = slideNames(probe).length;
       if (!srcCount) throw new Error("No slides found in source file.");
-      var nums = parseSlideList($("mergeSlides").value, srcCount);
+
+      var rawList = ($("mergeSlides") && $("mergeSlides").value) || "";
+      if (!String(rawList).trim()) {
+        rawList = "1-" + srcCount;
+        if ($("mergeSlides")) $("mergeSlides").value = rawList;
+      }
+      var nums = parseSlideList(rawList, srcCount);
       if (!nums.length) {
         throw new Error(
           "No valid slide numbers. This source has " + srcCount + " slides (try 1-" + srcCount + ")."
         );
       }
 
-      // Extract-only from source = only those slides, with working pictures.
-      // (Merging into empty blank-target was causing empty/broken outputs.)
       var result = await extractSlidesFromSource(mergeSourceFile, nums);
 
+      // Always force a real download with a NEW name (Brave/Edge: no silent overwrite)
+      var stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       var base = (mergeSourceFile.name || "slides").replace(/\.pptx$/i, "");
-      var outName = base + "_extracted.pptx";
-      var saved = await savePptxResult(result.blob, outName, null);
-      if (saved.mode === "cancelled") {
-        setStatus($("mergeStatus"), "Save cancelled.", "err");
-      } else {
-        setStatus(
-          $("mergeStatus"),
-          "Done — “" + outName + "” with " + result.count + " slide(s) and pictures intact.",
-          "ok"
-        );
-      }
+      var outName = base + "_extracted_" + stamp + ".pptx";
+      downloadBlob(result.blob, outName);
+      setStatus(
+        $("mergeStatus"),
+        "Downloaded “" +
+          outName +
+          "” (" +
+          result.count +
+          " of " +
+          result.totalInSource +
+          " slides). Check your Downloads folder.",
+        "ok"
+      );
     } catch (e) {
       console.error(e);
       setStatus($("mergeStatus"), "Error: " + (e.message || e), "err");
@@ -833,14 +943,13 @@
     btn.disabled = false;
   });
 
-  // Target field is optional now (extract does not need blank-target)
   if ($("mergeTargetLabel")) {
     $("mergeTargetLabel").textContent = "Not needed (extract from Source only)";
   }
   if ($("mergeStatus")) {
     setStatus(
       $("mergeStatus"),
-      "Choose a Source PPTX and slide numbers, then Extract. Target blank is not required.",
+      "1) Choose Source  2) Set slides (e.g. 1-10)  3) Extract — file goes to Downloads.",
       "ok"
     );
   }
