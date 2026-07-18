@@ -2,6 +2,13 @@
 (function () {
   "use strict";
 
+  // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
+  // different version strings, one browser is still using a cached script.
+  var TOOL_VERSION = "2026-07-18d";
+  try {
+    console.log("[AMC Studio] script version", TOOL_VERSION);
+  } catch (e) {}
+
   function $(id) {
     return document.getElementById(id);
   }
@@ -955,7 +962,8 @@
         $("mergeInsert").value = "0";
         setStatus(
           $("mergeStatus"),
-          "Using built-in blank target. Choose a Source, then Extract.",
+          "Using built-in blank target. Choose a Source, then Extract.  ·  v" +
+            TOOL_VERSION,
           "ok"
         );
         return true;
@@ -972,7 +980,7 @@
 
     for (var i = 0; i < urls.length; i++) {
       try {
-        var res = await fetch(urls[i], { cache: "no-cache" });
+        var res = await fetch(urls[i], { cache: "no-store" });
         if (!res.ok) throw new Error("HTTP " + res.status + " for " + urls[i]);
         var buf = await res.arrayBuffer();
         if (!buf || buf.byteLength < 1000) throw new Error("File too small / empty");
@@ -984,7 +992,8 @@
         $("mergeInsert").value = "0";
         setStatus(
           $("mergeStatus"),
-          "Using built-in blank target. Choose a Source, then Extract.",
+          "Using built-in blank target. Choose a Source, then Extract.  ·  v" +
+            TOOL_VERSION,
           "ok"
         );
         return true;
@@ -1078,13 +1087,22 @@
   if ($("mergeStatus")) {
     setStatus(
       $("mergeStatus"),
-      "Loading blank target… then: 1) Source  2) Slides  3) Extract.",
+      "Loading blank target… (script " + TOOL_VERSION + ")",
       "ok"
     );
   }
   ensureBlankTarget().then(function (ok) {
-    if (ok) return;
-    // ensureBlankTarget already set an error status
+    if (!ok) return; // ensureBlankTarget already set an error status
+    if ($("mergeStatus")) {
+      var cur = $("mergeStatus").textContent || "";
+      if (cur.indexOf(TOOL_VERSION) < 0) {
+        setStatus(
+          $("mergeStatus"),
+          cur + "  ·  v" + TOOL_VERSION,
+          "ok"
+        );
+      }
+    }
   });
 
   // ---- Image strip ----
