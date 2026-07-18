@@ -9,31 +9,91 @@
   <title>AMC Productivity Studio</title>
   <link rel="stylesheet" href="amc-tools.css">
   <style>
-    .back-bar {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 10px 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-    }
-    .back-bar a {
-      color: #0078d4;
-      font-weight: 600;
-      text-decoration: none;
-    }
-    .back-bar a:hover { text-decoration: underline; }
     .btn.danger:hover { background: #b71c1c; }
     .merge-actions { margin-top: 12px; }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 14px;
+    }
+    .panel-head h2 {
+      margin: 0;
+      font-size: 1.15rem;
+      flex: 1;
+    }
+    .help-btn {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      min-height: 28px;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid #ccc;
+      background: #e8e8e8;
+      color: #333;
+      font-size: 0.95rem;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .help-btn:hover { background: #d0d0d0; }
+    .help-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      background: rgba(0,0,0,.45);
+      padding: 16px;
+      align-items: center;
+      justify-content: center;
+    }
+    .help-modal.open { display: flex; }
+    .help-modal-card {
+      width: min(520px, 100%);
+      max-height: min(80vh, 640px);
+      overflow: auto;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 12px 36px rgba(0,0,0,.25);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+    .help-modal-card h3 { margin: 0 0 10px; font-size: 1.1rem; color: #222; }
+    .help-modal-card p, .help-modal-card li {
+      margin: 0 0 8px;
+      color: #444;
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+    .help-modal-card ul { margin: 0 0 8px; padding-left: 1.2em; }
+    .help-modal-card code {
+      font-size: 0.88em;
+      background: #f0f0f0;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .help-modal-card .help-close {
+      margin-top: 12px;
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-weight: 600;
+      background: #0078d4;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    .top h1 { margin: 0; }
+    .sub { display: none; }
   </style>
 </head>
 <body>
-  <div class="back-bar">
-    <a href="index.html">← Back to PPTX Notes Viewer</a>
-  </div>
-
   <header class="top">
     <div>
       <h1>AMC Productivity Studio</h1>
-      <p class="sub">Browser version of <em>AMC Pdf’s modification</em></p>
     </div>
   </header>
 
@@ -47,13 +107,10 @@
 
   <main>
     <section class="panel active" id="panel-merge">
-      <h2>PowerPoint Slide Extractor</h2>
-      <p class="hint">
-        <strong>PPTX source:</strong> clean slides → blank target (same as desktop).<br>
-        <strong>PDF source:</strong> each page is screenshot-rendered (image + text overlay)
-        into a full slide on the blank target.<br>
-        Blue button downloads <code>SourceName_EDIT.pptx</code>; red opens Notes Viewer (no download).
-      </p>
+      <div class="panel-head">
+        <h2>PowerPoint Slide Extractor</h2>
+        <button type="button" class="help-btn" data-help="merge" title="Help" aria-label="Help">?</button>
+      </div>
       <div class="grid2">
         <div class="drop" id="mergeSourceDrop">
           <strong>Source PPTX or PDF</strong>
@@ -84,11 +141,10 @@
     </section>
 
     <section class="panel" id="panel-strip">
-      <h2>Image Stripper</h2>
-      <p class="hint">
-        Removes pictures, background images, and picture-fills from every slide;
-        dark/colored slide backgrounds become white. Downloads <code>*_stripped.pptx</code>.
-      </p>
+      <div class="panel-head">
+        <h2>Image Stripper</h2>
+        <button type="button" class="help-btn" data-help="strip" title="Help" aria-label="Help">?</button>
+      </div>
       <div class="drop" id="stripDrop">
         <strong>Drop one or more PPTX files</strong>
         <span>or click to browse</span>
@@ -103,8 +159,10 @@
     </section>
 
     <section class="panel" id="panel-special">
-      <h2>Special Strip (blank slides)</h2>
-      <p class="hint">Strong cleanup for BT_INT-style decks. Downloads <code>*_COMPLETE_STRIP.pptx</code>.</p>
+      <div class="panel-head">
+        <h2>Special Strip</h2>
+        <button type="button" class="help-btn" data-help="special" title="Help" aria-label="Help">?</button>
+      </div>
       <div class="drop" id="specialDrop">
         <strong>Drop PPTX files</strong>
         <span>or click to browse</span>
@@ -119,8 +177,10 @@
     </section>
 
     <section class="panel" id="panel-fmt">
-      <h2>Text Formatter</h2>
-      <p class="hint">Paste text with <code>**bold**</code> markdown. Format → copy or download .txt</p>
+      <div class="panel-head">
+        <h2>Text Formatter</h2>
+        <button type="button" class="help-btn" data-help="fmt" title="Help" aria-label="Help">?</button>
+      </div>
       <div class="grid2 fmt-grid">
         <div>
           <label>Input</label>
@@ -141,8 +201,10 @@
     </section>
 
     <section class="panel" id="panel-ocr">
-      <h2>Text Extractor</h2>
-      <p class="hint">Upload a screenshot/image (or paste with Ctrl+V / Cmd+V). OCR runs in your browser.</p>
+      <div class="panel-head">
+        <h2>Text Extractor</h2>
+        <button type="button" class="help-btn" data-help="ocr" title="Help" aria-label="Help">?</button>
+      </div>
       <div class="row">
         <label class="btn primary file-btn">
           Choose image
@@ -157,14 +219,106 @@
     </section>
   </main>
 
-  <footer class="foot">
-    Screen-snipping is not available in the browser — upload or paste an image instead. Files stay on your device.
-  </footer>
+  <div class="help-modal" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+    <div class="help-modal-card">
+      <h3 id="helpModalTitle">Help</h3>
+      <div id="helpModalBody"></div>
+      <button type="button" class="help-close" id="helpModalClose">Close</button>
+    </div>
+  </div>
 
-  <script src="jszip.min.js?v=20260718i"></script>
-  <script src="blank-target-data.js?v=20260718i"></script>
-  <script src="pptx-loader.js?v=20260718i"></script>
-  <!-- PDF.js + Tesseract load on demand -->
-  <script src="amc-tools.js?v=20260718i"></script>
+  <script src="jszip.min.js?v=20260718k"></script>
+  <script src="blank-target-data.js?v=20260718k"></script>
+  <script src="pptx-loader.js?v=20260718k"></script>
+  <script src="amc-tools.js?v=20260718k"></script>
+  <script>
+    (function () {
+      var HELP = {
+        merge: {
+          title: "Help — PPTX Slide Extractor",
+          body:
+            "<p>Take slides (or PDF pages) from a <strong>Source</strong> and put them into a blank <strong>Target</strong> PowerPoint.</p>" +
+            "<ul>" +
+            "<li><strong>PPTX source:</strong> cleans selected slides (source/note boxes) and inserts them into the blank target.</li>" +
+            "<li><strong>PDF source:</strong> each page is screenshot-rendered (image + text overlay) as a full slide image.</li>" +
+            "<li><strong>OK — Extract Slides</strong> (blue): downloads <code>SourceName_EDIT.pptx</code>.</li>" +
+            "<li><strong>Extract → Notes Viewer</strong> (red): opens the result in Notes Viewer without downloading — edit notes there, then SAVE.</li>" +
+            "<li>Set <em>Slides / PDF pages</em> (e.g. <code>1-10</code> or <code>1,3,5</code>). Blank target uses insert after <code>0</code>.</li>" +
+            "</ul>",
+        },
+        strip: {
+          title: "Help — Image Stripper",
+          body:
+            "<p>Removes images from PowerPoint slides so you can work with cleaner decks.</p>" +
+            "<ul>" +
+            "<li>Drops picture shapes, background images, and picture-fills.</li>" +
+            "<li>Dark/colored slide backgrounds become white.</li>" +
+            "<li>Downloads <code>*_stripped.pptx</code> for each file.</li>" +
+            "</ul>",
+        },
+        special: {
+          title: "Help — Special Strip",
+          body:
+            "<p>Strong cleanup for BT_INT-style decks.</p>" +
+            "<ul>" +
+            "<li>Aggressive strip of content/images for hard-to-clean files.</li>" +
+            "<li>Downloads <code>*_COMPLETE_STRIP.pptx</code>.</li>" +
+            "<li>Use when Image Stripper is not enough.</li>" +
+            "</ul>",
+        },
+        fmt: {
+          title: "Help — Text Formatter",
+          body:
+            "<p>Formats pasted text that uses simple markdown markers.</p>" +
+            "<ul>" +
+            "<li>Paste into <strong>Input</strong>, click <strong>Format</strong>.</li>" +
+            "<li>Use <code>**bold**</code> and similar markers in the input.</li>" +
+            "<li>Copy the output or save as a <code>.txt</code> file.</li>" +
+            "</ul>",
+        },
+        ocr: {
+          title: "Help — Text Extractor",
+          body:
+            "<p>Reads text from an image using OCR in your browser.</p>" +
+            "<ul>" +
+            "<li>Choose an image or paste with <strong>Ctrl+V</strong> / <strong>Cmd+V</strong>.</li>" +
+            "<li>Needs internet once to load the OCR engine.</li>" +
+            "<li>Copy the extracted text with <strong>Copy text</strong>.</li>" +
+            "</ul>",
+        },
+      };
+
+      var modal = document.getElementById("helpModal");
+      var titleEl = document.getElementById("helpModalTitle");
+      var bodyEl = document.getElementById("helpModalBody");
+      var closeBtn = document.getElementById("helpModalClose");
+
+      function openHelp(id) {
+        var h = HELP[id];
+        if (!h) return;
+        if (titleEl) titleEl.textContent = h.title;
+        if (bodyEl) bodyEl.innerHTML = h.body;
+        if (modal) modal.classList.add("open");
+      }
+      function closeHelp() {
+        if (modal) modal.classList.remove("open");
+      }
+
+      document.querySelectorAll(".help-btn[data-help]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          openHelp(btn.getAttribute("data-help"));
+        });
+      });
+      if (closeBtn) closeBtn.addEventListener("click", closeHelp);
+      if (modal) {
+        modal.addEventListener("click", function (e) {
+          if (e.target === modal) closeHelp();
+        });
+      }
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeHelp();
+      });
+    })();
+  </script>
 </body>
 </html>

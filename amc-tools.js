@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-18i";
+  var TOOL_VERSION = "2026-07-18k";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -719,10 +719,8 @@
       setStatus(
         $("mergeStatus"),
         isPdfName(f.name)
-          ? "Source PDF: " +
-              c +
-              " page(s) — Extract renders each page as a slide image into blank target."
-          : "Source: " + c + " slides — ready to Extract into blank target.",
+          ? "Source PDF: " + c + " page(s)"
+          : "Source: " + c + " slides",
         "ok"
       );
     } catch (e) {
@@ -749,9 +747,8 @@
       $("mergeInsert").value = String(c);
       var msg =
         c === 0
-          ? "Target: blank (0 slides) — cleaned source slides will be inserted"
-          : "Target: " + c + " slides — cleaned source slides will be inserted after #" + c;
-      msg += " (result downloads; browser cannot silently overwrite)";
+          ? "Target: blank (0 slides)"
+          : "Target: " + c + " slides";
       setStatus($("mergeStatus"), msg, "ok");
     } catch (e) {
       setStatus($("mergeStatus"), "Could not read target: " + (e.message || e), "err");
@@ -1425,12 +1422,7 @@
         await loadTargetFromFile(emb, null);
         $("mergeTargetLabel").textContent = "blank-target.pptx (built-in)";
         $("mergeInsert").value = "0";
-        setStatus(
-          $("mergeStatus"),
-          "Using built-in blank target. Choose a Source, then Extract.  ·  v" +
-            TOOL_VERSION,
-          "ok"
-        );
+        setStatus($("mergeStatus"), "", "ok");
         return true;
       }
     } catch (e) {
@@ -1455,12 +1447,7 @@
         await loadTargetFromFile(file, null);
         $("mergeTargetLabel").textContent = "blank-target.pptx (built-in)";
         $("mergeInsert").value = "0";
-        setStatus(
-          $("mergeStatus"),
-          "Using built-in blank target. Choose a Source, then Extract.  ·  v" +
-            TOOL_VERSION,
-          "ok"
-        );
+        setStatus($("mergeStatus"), "", "ok");
         return true;
       } catch (e) {
         lastErr = e;
@@ -1689,27 +1676,8 @@
     });
   }
 
-  // Preload built-in blank target (0-slide shell) — original desktop workflow
-  if ($("mergeStatus")) {
-    setStatus(
-      $("mergeStatus"),
-      "Loading blank target… (script " + TOOL_VERSION + ")",
-      "ok"
-    );
-  }
-  ensureBlankTarget().then(function (ok) {
-    if (!ok) return; // ensureBlankTarget already set an error status
-    if ($("mergeStatus")) {
-      var cur = $("mergeStatus").textContent || "";
-      if (cur.indexOf(TOOL_VERSION) < 0) {
-        setStatus(
-          $("mergeStatus"),
-          cur + "  ·  v" + TOOL_VERSION,
-          "ok"
-        );
-      }
-    }
-  });
+  // Preload built-in blank target (0-slide shell) — quiet unless error
+  ensureBlankTarget();
 
   // ---- Image strip ----
   var stripFiles = [];

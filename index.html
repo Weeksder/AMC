@@ -40,6 +40,9 @@
       font-weight: 650;
       margin: 0 0 20px;
       letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .drop {
       border: 2px dashed var(--border);
@@ -212,16 +215,64 @@
       margin: 36px 0 28px;
     }
     .amc-section-head {
-      margin: 0 0 8px;
+      margin: 0 0 14px;
       font-size: 1.45rem;
       font-weight: 650;
       letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
-    .amc-section-sub {
-      margin: 0 0 14px;
-      color: var(--muted);
+    .help-btn {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      min-height: 28px;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: #3a4150;
+      color: #eef1f6;
       font-size: 0.95rem;
-      line-height: 1.45;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .help-btn:hover { background: #4a5568; }
+    .help-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1100;
+      background: rgba(0,0,0,.55);
+      padding: calc(16px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
+      align-items: center;
+      justify-content: center;
+    }
+    .help-modal.open { display: flex; }
+    .help-modal-card {
+      width: min(520px, 100%);
+      max-height: min(80vh, 640px);
+      overflow: auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    }
+    .help-modal-card h3 { margin: 0 0 10px; font-size: 1.1rem; }
+    .help-modal-card p, .help-modal-card li {
+      margin: 0 0 8px;
+      color: #c5ccd8;
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+    .help-modal-card ul { margin: 0 0 8px; padding-left: 1.2em; }
+    .help-modal-card .help-close {
+      margin-top: 12px;
+      background: var(--accent);
+      color: #fff;
+      width: 100%;
     }
     .amc-frame-wrap {
       border: 1px solid var(--border);
@@ -252,7 +303,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>PPTX Notes Viewer</h1>
+    <h1>PPTX Notes Viewer <button type="button" class="help-btn" id="helpNotesHome" title="Help" aria-label="Help for Notes Viewer">?</button></h1>
 
     <div class="drop" id="drop" tabindex="0" role="button"
          aria-label="Open PowerPoint file">
@@ -299,11 +350,7 @@
   <!-- AMC tools embedded below notes viewer -->
   <div class="page">
     <hr class="divider">
-    <h2 class="amc-section-head">AMC Productivity Studio</h2>
-    <p class="amc-section-sub">
-      Text extractor, slide merge, image strip, special strip, and text formatter
-      (web version of AMC Pdf’s modification).
-    </p>
+    <h2 class="amc-section-head">AMC Productivity Studio <button type="button" class="help-btn" id="helpStudioHome" title="Help" aria-label="Help for AMC Productivity Studio">?</button></h2>
     <div class="amc-frame-wrap">
       <iframe
         class="amc-frame"
@@ -311,6 +358,14 @@
         title="AMC Productivity Studio tools"
         loading="lazy"
       ></iframe>
+    </div>
+  </div>
+
+  <div class="help-modal" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+    <div class="help-modal-card">
+      <h3 id="helpModalTitle">Help</h3>
+      <div id="helpModalBody"></div>
+      <button type="button" class="btn help-close" id="helpModalClose">Close</button>
     </div>
   </div>
 
@@ -477,7 +532,59 @@
         if (e.key === "Escape" && snippetModal && snippetModal.classList.contains("open")) {
           closeSnippetEditor();
         }
+        if (e.key === "Escape" && helpModal && helpModal.classList.contains("open")) {
+          closeHelp();
+        }
       });
+
+      var HELP = {
+        notes:
+          "<p><strong>PPTX Notes Viewer</strong> opens a PowerPoint so you can read slides and type speaker notes in the browser.</p>" +
+          "<ul>" +
+          "<li>Open a <code>.pptx</code> file — it loads in the Notes Viewer.</li>" +
+          "<li>Edit notes under each slide. Use formatting tools (bold, lists, etc.).</li>" +
+          "<li>Press <strong>SAVE</strong> to download a PowerPoint with your notes written into the file.</li>" +
+          "<li>Open the downloaded <code>*_notes.pptx</code> in PowerPoint and use <em>View → Notes</em>.</li>" +
+          "</ul>" +
+          "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
+          "<p><strong>AMC Teacher Login</strong> opens your teacher login page.</p>",
+        studio:
+          "<p><strong>AMC Productivity Studio</strong> tools appear in the frame below. Use the <strong>?</strong> on each tool tab for details.</p>" +
+          "<ul>" +
+          "<li><strong>PPTX Slide Extractor</strong> — clean selected slides (or PDF pages) into a blank PowerPoint.</li>" +
+          "<li><strong>Image Stripper</strong> — remove pictures/background images from slides.</li>" +
+          "<li><strong>Special Strip</strong> — heavy cleanup for BT_INT-style decks.</li>" +
+          "<li><strong>Text Formatter</strong> — format markdown-style text.</li>" +
+          "<li><strong>Text Extractor</strong> — OCR text from a screenshot/image.</li>" +
+          "</ul>",
+      };
+
+      var helpModal = document.getElementById("helpModal");
+      var helpModalTitle = document.getElementById("helpModalTitle");
+      var helpModalBody = document.getElementById("helpModalBody");
+      var helpModalClose = document.getElementById("helpModalClose");
+
+      function openHelp(id) {
+        var title =
+          id === "notes" ? "Help — PPTX Notes Viewer" : "Help — AMC Productivity Studio";
+        var body = HELP[id] || "<p>No help available.</p>";
+        if (helpModalTitle) helpModalTitle.textContent = title;
+        if (helpModalBody) helpModalBody.innerHTML = body;
+        if (helpModal) helpModal.classList.add("open");
+      }
+      function closeHelp() {
+        if (helpModal) helpModal.classList.remove("open");
+      }
+      var helpNotesHome = document.getElementById("helpNotesHome");
+      var helpStudioHome = document.getElementById("helpStudioHome");
+      if (helpNotesHome) helpNotesHome.addEventListener("click", function () { openHelp("notes"); });
+      if (helpStudioHome) helpStudioHome.addEventListener("click", function () { openHelp("studio"); });
+      if (helpModalClose) helpModalClose.addEventListener("click", closeHelp);
+      if (helpModal) {
+        helpModal.addEventListener("click", function (e) {
+          if (e.target === helpModal) closeHelp();
+        });
+      }
 
       function looksLikePptx(file) {
         if (!file) return false;

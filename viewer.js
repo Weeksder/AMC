@@ -60,10 +60,15 @@
   function saveCurrentNotes() {
     if (!SLIDES.length || index < 0 || index >= SLIDES.length) return;
     try {
-      const html = notesBody.innerHTML;
+      let html = notesBody.innerHTML;
+      // Don't persist the placeholder as real notes
+      if (notesBody.querySelector && notesBody.querySelector("p.empty-notes")) {
+        html = "";
+      }
       localStorage.setItem(storageKey(index), JSON.stringify({ format: NOTES_FORMAT, html: html }));
       SLIDES[index].notesHtml = html;
-      SLIDES[index].hasNotes = notesBody.innerText.trim().length > 0;
+      SLIDES[index].hasNotes = notesBody.innerText.trim().length > 0 &&
+        !(notesBody.querySelector && notesBody.querySelector("p.empty-notes"));
       const thumb = thumbsEl.querySelector('.thumb[data-i="' + index + '"]');
       if (thumb) thumb.classList.toggle("has-notes", SLIDES[index].hasNotes);
     } catch (e) {
@@ -381,6 +386,21 @@
     setHideTools(!appEl.classList.contains("hide-tools"));
   });
 
+  var btnViewerHelp = document.getElementById("btnViewerHelp");
+  if (btnViewerHelp) {
+    btnViewerHelp.addEventListener("click", function () {
+      alert(
+        "Notes Viewer help\n\n" +
+          "• Browse slides in the left thumbnails or use ◀ ▶ / arrow keys.\n" +
+          "• Type speaker notes in the bottom pane. Use B / I / U and lists to format.\n" +
+          "• Hide picture / Hide tools toggle the layout.\n" +
+          "• SAVE downloads a .pptx with your notes written into the file.\n" +
+          "• Open that file in PowerPoint and use View → Notes to see them.\n" +
+          "• Open loads another PowerPoint. Home returns to the main page."
+      );
+    });
+  }
+
   // SAVE → download a real .pptx with your notes (one step)
   if (btnSaveJson) {
     btnSaveJson.addEventListener("click", async function () {
@@ -395,9 +415,12 @@
       btnSaveJson.disabled = true;
       btnSaveJson.textContent = "…";
       try {
+        // Flush every slide's notes from the editor into SLIDES[]
         saveCurrentNotes();
         var blob = await PptxNotesLoader.buildPptxBlobWithNotes(ORIGINAL_PPTX_BUFFER, SLIDES);
-        var base = (ORIGINAL_FILE_NAME || DECK_KEY + ".pptx").replace(/\.pptx$/i, "");
+        var base = (ORIGINAL_FILE_NAME || DECK_KEY + ".pptx")
+          .replace(/\.pptx$/i, "")
+          .replace(/_notes$/i, "");
         var outName = base + "_notes.pptx";
         var result = await PptxNotesLoader.downloadBlob(blob, outName);
         if (result && result.cancelled) {
@@ -405,8 +428,13 @@
           btnSaveJson.disabled = false;
           return;
         }
+        // Keep buffer in sync so a second SAVE still has the full package
+        try {
+          ORIGINAL_PPTX_BUFFER = await blob.arrayBuffer();
+          ORIGINAL_FILE_NAME = outName;
+        } catch (e) {}
         if (saveStatus) {
-          saveStatus.textContent = "saved " + outName;
+          saveStatus.textContent = "saved " + outName + " — open this file in PowerPoint (View → Notes)";
           saveStatus.classList.add("show");
         }
       } catch (err) {
