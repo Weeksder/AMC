@@ -497,14 +497,26 @@
     prsRels = prsRels.replace(/<Relationship\b[^>]*>[\s\S]*?<\/Relationship>/g, filterRelTag);
     zip.file("ppt/_rels/presentation.xml.rels", prsRels);
 
-    // Remove slide parts not kept
+    // Remove slide parts not kept; clean kept slides (watermark strip + source/note fix)
+    var cleanJobs = [];
     slideNames(zip).forEach(function (path) {
       var base = path.split("/").pop();
-      if (keepSlidePath[path] || keepSlidePath[base]) return;
+      if (keepSlidePath[path] || keepSlidePath[base]) {
+        cleanJobs.push(
+          zip
+            .file(path)
+            .async("string")
+            .then(function (xml) {
+              zip.file(path, cleanSlideXmlLikeDesktop(xml));
+            })
+        );
+        return;
+      }
       zip.remove(path);
       var relsPath = "ppt/slides/_rels/" + base + ".rels";
       if (zip.file(relsPath)) zip.remove(relsPath);
     });
+    await Promise.all(cleanJobs);
 
     // Verify kept slides still exist
     var kept = 0;
@@ -543,6 +555,111 @@
   function pathSlideNum(path) {
     var m = String(path).match(/slide(\d+)\.xml$/i);
     return m ? m[1] : "1";
+  }
+
+  /**
+   * Same cleanup as desktop AMC Pdf's modification (extract path):
+   * - Fix short "Source:" / "Note:" text boxes (margins, bullets, indent)
+   * - Strip watermark-like text shapes
+   * - Strip empty title placeholders and bare "Shape N" overlays when a picture exists
+   */
+  function cleanSlideXmlLikeDesktop(xml) {
+    try {
+      var doc = new DOMParser().parseFromString(xml, "application/xml");
+      if (doc.getElementsByTagName("parsererror").length) return xml;
+
+      function shapeName(sp) {
+        var pr = localAll(sp, "cNvPr")[0];
+        return pr ? pr.getAttribute("name") || "" : "";
+      }
+      function shapeText(sp) {
+        return localAll(sp, "t")
+          .map(function (t) {
+            return t.textContent || "";
+          })
+          .join("");
+      }
+      function removeEl(el) {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      }
+
+      var pics = localAll(doc, "pic");
+      var hasPic = pics.length > 0;
+
+      // Remove watermark / citation text shapes (and empty title shells when a photo is present)
+      localAll(doc, "sp").forEach(function (sp) {
+        var text = shapeText(sp);
+        var low = text.toLowerCase().replace(/\s+/g, " ").trim();
+        var name = shapeName(sp);
+
+        // Explicit watermark / footer / source lines
+        if (
+          /source\s*:|note\s*:|copyright|©|all rights reserved|confidential|watermark|amc\s*english|www\.|https?:\/\//i.test(
+            low
+          )
+        ) {
+          removeEl(sp);
+          return;
+        }
+
+        // Empty title placeholder sitting on image slides (常見 AMC: 標題 1)
+        if (hasPic && !low && /標題|title|placeholder/i.test(name)) {
+          removeEl(sp);
+          return;
+        }
+
+        // Bare "Shape 123" overlays with almost no text (often watermark chrome)
+        if (hasPic && /^Shape\s*\d+$/i.test(name) && low.length < 8) {
+          removeEl(sp);
+          return;
+        }
+      });
+
+      // Original desktop "fix" for short source/note-style boxes that remain
+      localAll(doc, "txBody").forEach(function (tb) {
+        var full = localAll(tb, "t")
+          .map(function (t) {
+            return t.textContent || "";
+          })
+          .join("")
+          .toLowerCase();
+        if (!(full.indexOf("source:") >= 0 || full.indexOf("note:") >= 0 || (full.length > 0 && full.length < 150))) {
+          return;
+        }
+        var bodyPr = null;
+        for (var i = 0; i < tb.childNodes.length; i++) {
+          var ch = tb.childNodes[i];
+          if (ch.nodeType === 1 && ch.localName === "bodyPr") bodyPr = ch;
+        }
+        if (bodyPr) {
+          ["lIns", "tIns", "rIns", "bIns"].forEach(function (a) {
+            if (bodyPr.getAttribute(a) != null) bodyPr.setAttribute(a, "0");
+          });
+        }
+        localAll(tb, "pPr").forEach(function (ppr) {
+          if (ppr.getAttribute("lvl")) ppr.setAttribute("lvl", "0");
+          ppr.removeAttribute("marL");
+          ppr.removeAttribute("indent");
+          if (ppr.getAttribute("algn")) ppr.setAttribute("algn", "l");
+          // remove bullet children
+          Array.prototype.slice.call(ppr.childNodes).forEach(function (c) {
+            if (c.nodeType !== 1) return;
+            if (/^bu/i.test(c.localName || "")) removeEl(c);
+          });
+        });
+      });
+
+      var out = new XMLSerializer().serializeToString(doc);
+      out = out.replace(/\sxmlns=""/g, "");
+      // Keep a normal OOXML declaration
+      if (out.indexOf("<?xml") !== 0) {
+        out = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + out;
+      }
+      return out;
+    } catch (e) {
+      console.warn("cleanSlideXmlLikeDesktop failed", e);
+      return xml;
+    }
   }
 
   /**
@@ -900,7 +1017,7 @@
     }
     var btn = $("mergeGo");
     btn.disabled = true;
-    setStatus($("mergeStatus"), "Extracting slides…");
+    setStatus($("mergeStatus"), "Extracting slides + cleaning watermarks…");
     try {
       var probe = await JSZip.loadAsync(await readFileAsArrayBuffer(mergeSourceFile));
       var srcCount = slideNames(probe).length;
@@ -933,7 +1050,7 @@
           result.count +
           " of " +
           result.totalInSource +
-          " slides). Check your Downloads folder.",
+          " slides, cleaned). Check Downloads.",
         "ok"
       );
     } catch (e) {
