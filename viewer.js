@@ -1,6 +1,8 @@
 (function () {
   let DECK_KEY = "deck";
   let SLIDES = [];
+  let ORIGINAL_PPTX_BUFFER = null; // ArrayBuffer of the opened .pptx for SAVE
+  let ORIGINAL_FILE_NAME = "";
   let STORAGE_PREFIX = "pptxNotesViewer:v3:" + DECK_KEY + ":";
   const NOTES_FORMAT = 3;
 
@@ -33,6 +35,7 @@
   const btnTogglePicture = document.getElementById("btnTogglePicture");
   const btnToggleTools = document.getElementById("btnToggleTools");
   const btnHome = document.getElementById("btnHome");
+  const btnSaveJson = document.getElementById("btnSaveJson");
   const btnResetNotes = document.getElementById("btnResetNotes");
   const saveStatus = document.getElementById("saveStatus");
 
@@ -75,6 +78,8 @@
   function setDeck(payload) {
     DECK_KEY = payload.deckKey || payload.title || "deck";
     SLIDES = payload.slides || [];
+    ORIGINAL_PPTX_BUFFER = payload.pptxBuffer || null;
+    ORIGINAL_FILE_NAME = payload.fileName || DECK_KEY + ".pptx";
     STORAGE_PREFIX = "pptxNotesViewer:v3:" + DECK_KEY + ":";
     document.title = DECK_KEY + " — Notes Viewer";
     deckTitle.textContent = DECK_KEY;
@@ -376,6 +381,43 @@
     setHideTools(!appEl.classList.contains("hide-tools"));
   });
 
+  // SAVE → download a real .pptx with your notes (one step)
+  if (btnSaveJson) {
+    btnSaveJson.addEventListener("click", async function () {
+      if (!SLIDES.length) {
+        alert("Open a PowerPoint first.");
+        return;
+      }
+      if (!ORIGINAL_PPTX_BUFFER) {
+        alert("Open the .pptx file again, then press SAVE.\n(The original file is needed to build the download.)");
+        return;
+      }
+      btnSaveJson.disabled = true;
+      btnSaveJson.textContent = "…";
+      try {
+        saveCurrentNotes();
+        var blob = await PptxNotesLoader.buildPptxBlobWithNotes(ORIGINAL_PPTX_BUFFER, SLIDES);
+        var base = (ORIGINAL_FILE_NAME || DECK_KEY + ".pptx").replace(/\.pptx$/i, "");
+        var outName = base + "_notes.pptx";
+        var result = await PptxNotesLoader.downloadBlob(blob, outName);
+        if (result && result.cancelled) {
+          btnSaveJson.textContent = "SAVE";
+          btnSaveJson.disabled = false;
+          return;
+        }
+        if (saveStatus) {
+          saveStatus.textContent = "saved " + outName;
+          saveStatus.classList.add("show");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Could not save: " + (err && err.message ? err.message : err));
+      }
+      btnSaveJson.textContent = "SAVE";
+      btnSaveJson.disabled = false;
+    });
+  }
+
   // Open another file (local / iCloud / Files) — Safari-safe
   function triggerOpenPicker() {
     openFileInput.value = "";
@@ -432,8 +474,9 @@
       if (sw > 0) sidebarW = sw;
     } catch (e) {}
     applySidebarWidth(sidebarW, false);
+    // Picture/slide is always visible by default (do not restore "hidden")
     try {
-      setHidePicture(localStorage.getItem(STORAGE_PREFIX + "hidePicture") === "1");
+      setHidePicture(false);
       setHideTools(localStorage.getItem(STORAGE_PREFIX + "hideTools") === "1");
     } catch (e) {
       setHidePicture(false);

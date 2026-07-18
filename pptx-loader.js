@@ -354,12 +354,16 @@
     var slides = await pptxFileToSlides(file);
     var deckKey = safeDeckKey(file.name);
     var handoffId = String(Date.now()) + "_" + Math.random().toString(36).slice(2, 8);
+    // Keep original bytes so SAVE can download a real .pptx with notes (no JSON step)
+    var pptxBuffer = await file.arrayBuffer();
 
     try {
       await handoffPut(handoffId, {
         deckKey: deckKey,
         title: deckKey,
         slides: slides,
+        pptxBuffer: pptxBuffer,
+        fileName: file.name || deckKey + ".pptx",
         createdAt: Date.now(),
       });
     } catch (e) {
@@ -413,6 +417,267 @@
     throw new Error("Pop-up blocked. Allow pop-ups, or open the file again to load in this tab.");
   }
 
+  function escapeXml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** notesHtml → OOXML paragraph fragments for a:txBody */
+  function notesHtmlToOoxmlParagraphs(notesHtml) {
+    if (!notesHtml || !String(notesHtml).replace(/<[^>]+>/g, "").trim()) {
+      return "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>";
+    }
+    var wrap = document.createElement("div");
+    wrap.innerHTML = notesHtml;
+    var parts = [];
+
+    function runsFromNode(node) {
+      var xml = "";
+      function walk(n, bold, italic, under) {
+        if (n.nodeType === 3) {
+          var t = n.nodeValue || "";
+          if (!t) return;
+          // a:t cannot be empty; preserve spaces
+          var rPr = ' lang="en-US" dirty="0"';
+          if (bold) rPr += ' b="1"';
+          if (italic) rPr += ' i="1"';
+          if (under) rPr += ' u="sng"';
+          xml += "<a:r><a:rPr" + rPr + "/><a:t>" + escapeXml(t) + "</a:t></a:r>";
+          return;
+        }
+        if (n.nodeType !== 1) return;
+        var tag = n.tagName.toLowerCase();
+        if (tag === "br") {
+          xml += "<a:br/>";
+          return;
+        }
+        var b = bold || tag === "strong" || tag === "b";
+        var i = italic || tag === "em" || tag === "i";
+        var u = under || tag === "u";
+        Array.prototype.forEach.call(n.childNodes, function (ch) {
+          walk(ch, b, i, u);
+        });
+      }
+      Array.prototype.forEach.call(node.childNodes, function (ch) {
+        walk(ch, false, false, false);
+      });
+      return xml;
+    }
+
+    function emitBlock(el) {
+      var tag = el.tagName ? el.tagName.toLowerCase() : "";
+      if (tag === "hr") {
+        parts.push(
+          "<a:p><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>" +
+            escapeXml("===============================================") +
+            "</a:t></a:r></a:p>"
+        );
+        return;
+      }
+      if (tag === "br") {
+        parts.push("<a:p><a:endParaRPr lang=\"en-US\"/></a:p>");
+        return;
+      }
+      var level = 0;
+      if (el.getAttribute && el.getAttribute("data-level")) {
+        level = parseInt(el.getAttribute("data-level"), 10) || 0;
+      }
+      if (tag === "li") level = Math.max(level, 1);
+      var forceBold = tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4";
+      var inner = "";
+      if (forceBold) {
+        var plain = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (!plain) {
+          parts.push("<a:p><a:endParaRPr lang=\"en-US\"/></a:p>");
+          return;
+        }
+        inner =
+          "<a:r><a:rPr lang=\"en-US\" dirty=\"0\" b=\"1\"/><a:t>" +
+          escapeXml(plain) +
+          "</a:t></a:r>";
+      } else {
+        inner = runsFromNode(el);
+      }
+      if (!inner) {
+        parts.push("<a:p><a:endParaRPr lang=\"en-US\"/></a:p>");
+        return;
+      }
+      var pPr = level > 0 ? "<a:pPr lvl=\"" + level + "\"/>" : "<a:pPr/>";
+      parts.push("<a:p>" + pPr + inner + "</a:p>");
+    }
+
+    Array.prototype.forEach.call(wrap.childNodes, function (n) {
+      if (n.nodeType === 3) {
+        var t = (n.nodeValue || "").trim();
+        if (t) {
+          parts.push(
+            "<a:p><a:pPr/><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>" +
+              escapeXml(t) +
+              "</a:t></a:r></a:p>"
+          );
+        }
+        return;
+      }
+      if (n.nodeType === 1) emitBlock(n);
+    });
+
+    if (!parts.length) return "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>";
+    return parts.join("");
+  }
+
+  function findNotesTxBody(notesDoc) {
+    var bodies = xmlLocalAll(notesDoc, "txBody");
+    if (!bodies.length) return null;
+    // Prefer placeholder body (notes text), not the slide thumbnail
+    for (var i = 0; i < bodies.length; i++) {
+      var sp = bodies[i].parentNode;
+      while (sp && sp.localName !== "sp") sp = sp.parentNode;
+      if (!sp) continue;
+      var phs = xmlLocalAll(sp, "ph");
+      for (var j = 0; j < phs.length; j++) {
+        var typ = (phs[j].getAttribute("type") || "").toLowerCase();
+        if (typ === "body" || typ.indexOf("notes") >= 0) return bodies[i];
+      }
+      var names = xmlLocalAll(sp, "cNvPr");
+      for (var k = 0; k < names.length; k++) {
+        var nm = (names[k].getAttribute("name") || "").toLowerCase();
+        if (nm.indexOf("notes") >= 0) return bodies[i];
+      }
+    }
+    // Fallback: last txBody (usually notes text)
+    return bodies[bodies.length - 1];
+  }
+
+  function setTxBodyParagraphs(txBody, paragraphsXml) {
+    // Keep a:bodyPr / a:lstStyle if present; replace a:p children
+    var keep = [];
+    Array.prototype.forEach.call(txBody.childNodes, function (ch) {
+      if (ch.nodeType === 1 && (ch.localName === "bodyPr" || ch.localName === "lstStyle")) {
+        keep.push(ch);
+      }
+    });
+    while (txBody.firstChild) txBody.removeChild(txBody.firstChild);
+    keep.forEach(function (ch) {
+      txBody.appendChild(ch);
+    });
+    var frag = new DOMParser().parseFromString(
+      "<root xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">" +
+        paragraphsXml +
+        "</root>",
+      "application/xml"
+    );
+    var root = frag.documentElement;
+    Array.prototype.forEach.call(root.childNodes, function (ch) {
+      if (ch.nodeType === 1) {
+        txBody.appendChild(txBody.ownerDocument.importNode(ch, true));
+      }
+    });
+  }
+
+  /**
+   * Write current slide notes into a copy of the original PPTX and return a Blob.
+   * @param {ArrayBuffer} pptxBuffer
+   * @param {Array<{n:number,notesHtml:string}>} slides
+   */
+  async function buildPptxBlobWithNotes(pptxBuffer, slides) {
+    if (typeof JSZip === "undefined") throw new Error("JSZip failed to load");
+    if (!pptxBuffer) throw new Error("Original PowerPoint data missing — open the .pptx again, then SAVE.");
+
+    var zip = await JSZip.loadAsync(pptxBuffer);
+    var presRelsFile = zip.file("ppt/_rels/presentation.xml.rels");
+    var presFile = zip.file("ppt/presentation.xml");
+    if (!presRelsFile || !presFile) throw new Error("Invalid PowerPoint file");
+
+    var idToTarget = relsMap(await presRelsFile.async("text"));
+    var presDoc = new DOMParser().parseFromString(await presFile.async("text"), "application/xml");
+    var R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    var slideTargets = [];
+    xmlLocalAll(presDoc, "sldId").forEach(function (el) {
+      var rid = el.getAttributeNS(R_NS, "id") || el.getAttribute("r:id");
+      if (!rid || !idToTarget[rid]) return;
+      var t = String(idToTarget[rid]).replace(/\\/g, "/").replace(/^\//, "");
+      if (!t.startsWith("ppt/")) t = "ppt/" + t;
+      slideTargets.push(t);
+    });
+
+    var serializer = new XMLSerializer();
+    for (var i = 0; i < slideTargets.length; i++) {
+      var slidePath = slideTargets[i];
+      var slideFile = zip.file(slidePath);
+      if (!slideFile) continue;
+      var baseDir = slidePath.split("/").slice(0, -1).join("/");
+      var relsPath = baseDir + "/_rels/" + slidePath.split("/").pop() + ".rels";
+      var relsFile = zip.file(relsPath);
+      if (!relsFile) continue;
+      var rels = relsMap(await relsFile.async("text"));
+      var notesRid = Object.keys(rels).find(function (id) {
+        return (rels[id] || "").toLowerCase().indexOf("notesslide") >= 0;
+      });
+      if (!notesRid) continue;
+      var notesPath = joinPptPath(baseDir, rels[notesRid]);
+      var notesFile = zip.file(notesPath);
+      if (!notesFile) continue;
+
+      var notesHtml = "";
+      if (slides[i]) notesHtml = slides[i].notesHtml || "";
+      var notesXml = await notesFile.async("text");
+      var notesDoc = new DOMParser().parseFromString(notesXml, "application/xml");
+      var txBody = findNotesTxBody(notesDoc);
+      if (!txBody) continue;
+      setTxBodyParagraphs(txBody, notesHtmlToOoxmlParagraphs(notesHtml));
+      var outXml = serializer.serializeToString(notesDoc);
+      // Ensure XML declaration
+      if (outXml.indexOf("<?xml") !== 0) {
+        outXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + outXml;
+      }
+      zip.file(notesPath, outXml);
+    }
+
+    return await zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      compression: "DEFLATE",
+    });
+  }
+
+  async function downloadBlob(blob, fileName) {
+    var name = fileName || "presentation_notes.pptx";
+    if (window.showSaveFilePicker) {
+      try {
+        var handle = await window.showSaveFilePicker({
+          suggestedName: name,
+          types: [
+            {
+              description: "PowerPoint",
+              accept: {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
+              },
+            },
+          ],
+        });
+        var writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return { method: "picker" };
+      } catch (err) {
+        if (err && err.name === "AbortError") return { cancelled: true };
+      }
+    }
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 1500);
+    return { method: "download" };
+  }
+
   global.PptxNotesLoader = {
     pptxFileToSlides: pptxFileToSlides,
     openPptxInNewTab: openPptxInNewTab,
@@ -421,5 +686,7 @@
     handoffPut: handoffPut,
     safeDeckKey: safeDeckKey,
     isAppleMobile: isAppleMobile,
+    buildPptxBlobWithNotes: buildPptxBlobWithNotes,
+    downloadBlob: downloadBlob,
   };
 })(typeof window !== "undefined" ? window : globalThis);

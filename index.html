@@ -38,14 +38,8 @@
     h1 {
       font-size: 1.7rem;
       font-weight: 650;
-      margin: 0 0 8px;
+      margin: 0 0 20px;
       letter-spacing: -0.02em;
-    }
-    .sub {
-      color: var(--muted);
-      font-size: 0.98rem;
-      line-height: 1.45;
-      margin: 0 0 24px;
     }
     .drop {
       border: 2px dashed var(--border);
@@ -65,7 +59,6 @@
     }
     .drop .icon { font-size: 2.2rem; margin-bottom: 10px; }
     .drop strong { display: block; font-size: 1.05rem; margin-bottom: 6px; }
-    .drop span { color: var(--muted); font-size: 0.9rem; display: block; line-height: 1.4; }
     .actions {
       display: flex;
       gap: 10px;
@@ -73,7 +66,7 @@
       margin-top: 20px;
       flex-wrap: wrap;
     }
-    button {
+    button, a.btn {
       appearance: none;
       -webkit-appearance: none;
       border: none;
@@ -83,8 +76,12 @@
       font-weight: 600;
       cursor: pointer;
       font-family: inherit;
-      min-height: 48px; /* Apple touch target */
+      min-height: 48px;
       touch-action: manipulation;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     .btn-primary {
       background: var(--accent);
@@ -92,11 +89,13 @@
     }
     .btn-primary:active { background: var(--accent-hover); }
     .btn-primary:disabled { opacity: 0.55; cursor: default; }
-    .btn-secondary {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
+    .btn-amc {
+      background: #2b6cb0;
+      color: #fff;
+      width: 100%;
+      margin-top: 16px;
     }
+    .btn-amc:active { background: #2c5282; }
     .status {
       margin-top: 18px;
       min-height: 1.4em;
@@ -108,19 +107,6 @@
     }
     .status.error { color: #ff8e8e; }
     .status.ok { color: #8fd49a; }
-    .tips {
-      margin-top: 32px;
-      padding: 16px 18px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 0.88rem;
-      line-height: 1.5;
-    }
-    .tips strong { color: var(--text); }
-    ul { margin: 8px 0 0; padding-left: 1.2em; }
-    /* Visible enough for iOS accessibility but triggered via buttons */
     .file-input-wrap {
       position: absolute;
       width: 1px;
@@ -133,25 +119,19 @@
 <body>
   <div class="wrap">
     <h1>PPTX Notes Viewer</h1>
-    <p class="sub">
-      Open a PowerPoint from this device or from iCloud / Files / Drive.
-      Works in Safari on iPhone, iPad, and Mac.
-    </p>
 
     <div class="drop" id="drop" tabindex="0" role="button"
-         aria-label="Open PowerPoint file from device or cloud">
+         aria-label="Open PowerPoint file">
       <div class="icon">📑</div>
       <strong>Open a .pptx file</strong>
-      <span id="dropHint">On iPhone/iPad: Browse → iCloud Drive, Downloads, or On My iPhone</span>
       <div class="actions">
         <button type="button" class="btn-primary" id="btnOpen">Open file</button>
       </div>
     </div>
 
-    <!--
-      Multiple accept types help iOS Files picker show PPTX from local + cloud providers.
-      No capture attribute — we want Files / iCloud, not camera.
-    -->
+    <!-- Set your AMC Online class URL below in the script (AMC_ONLINE_CLASS_URL) -->
+    <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Online Class</a>
+
     <div class="file-input-wrap">
       <input
         type="file"
@@ -161,35 +141,29 @@
     </div>
 
     <p class="status" id="status"></p>
-
-    <div class="tips">
-      <strong>Apple devices</strong>
-      <ul>
-        <li><strong>iPhone / iPad:</strong> Open file → <em>Browse</em> → iCloud Drive, Downloads, Google Drive, OneDrive, etc.</li>
-        <li><strong>Mac Safari:</strong> choose a local file or a cloud folder synced in Finder.</li>
-        <li>Use a modern <strong>.pptx</strong> (not old .ppt).</li>
-        <li>On iPhone/iPad the viewer often opens <strong>in this tab</strong> (more reliable than pop-ups).</li>
-        <li>Large decks need more memory — if Safari reloads, try a smaller file.</li>
-        <li>Avoid <strong>Private Browsing</strong> if open fails (storage is limited there).</li>
-      </ul>
-    </div>
   </div>
 
   <script src="jszip.min.js"></script>
   <script src="pptx-loader.js"></script>
   <script>
     (function () {
+      // ========== PASTE YOUR AMC ONLINE CLASS LINK HERE ==========
+      var AMC_ONLINE_CLASS_URL = "https://www.xn--fiqv34aqphd4v.com/member/Login_teacher_rwd.aspx";
+      // ===========================================================
+
       var drop = document.getElementById("drop");
       var fileInput = document.getElementById("fileInput");
       var btnOpen = document.getElementById("btnOpen");
+      var btnAmc = document.getElementById("btnAmcClass");
       var statusEl = document.getElementById("status");
-      var dropHint = document.getElementById("dropHint");
 
-      if (window.PptxNotesLoader && PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile()) {
-        dropHint.textContent =
-          "Tap Open file → Browse → iCloud Drive, Downloads, or On My iPhone / iPad";
+      if (AMC_ONLINE_CLASS_URL && AMC_ONLINE_CLASS_URL.indexOf("REPLACE_WITH_") === -1) {
+        btnAmc.href = AMC_ONLINE_CLASS_URL;
       } else {
-        dropHint.textContent = "Click to choose a file, or drop a .pptx here (desktop)";
+        btnAmc.addEventListener("click", function (e) {
+          e.preventDefault();
+          alert("Set AMC_ONLINE_CLASS_URL in index.html to your class link, then re-upload to GitHub.");
+        });
       }
 
       function setStatus(msg, kind) {
@@ -201,10 +175,8 @@
         if (!file) return false;
         var n = (file.name || "").toLowerCase();
         if (n.endsWith(".pptx")) return true;
-        // iOS sometimes strips/odd-names; allow empty name with pptx mime
         var t = (file.type || "").toLowerCase();
         if (t.indexOf("presentationml") >= 0 || t.indexOf("powerpoint") >= 0) return true;
-        // Last resort: user picked something from Files — try load and let parser fail
         if (!n && file.size > 1000) return true;
         return false;
       }
@@ -223,7 +195,6 @@
         btnOpen.disabled = true;
         setStatus("Loading “" + (file.name || "presentation") + "”…");
 
-        // Safari: open placeholder tab during the same user gesture when possible
         var pre = null;
         var apple = window.PptxNotesLoader && PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile();
         if (!apple && window.PptxNotesLoader && PptxNotesLoader.openPlaceholderTab) {
@@ -278,7 +249,6 @@
         if (f) handleFile(f);
       });
 
-      // Desktop drag-drop (limited/no-op on iOS — fine)
       ["dragenter", "dragover"].forEach(function (ev) {
         drop.addEventListener(ev, function (e) {
           e.preventDefault();
