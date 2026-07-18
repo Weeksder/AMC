@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-18g";
+  var TOOL_VERSION = "2026-07-18h";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -1207,7 +1207,7 @@
     setMergeButtonsDisabled(false);
   });
 
-  // Red button: extract → download → open Notes Viewer
+  // Red button: extract only → open Notes Viewer (no download; SAVE from viewer later)
   if ($("mergeGoViewer")) {
     $("mergeGoViewer").addEventListener("click", async function () {
       setMergeButtonsDisabled(true);
@@ -1225,7 +1225,7 @@
 
       try {
         var result = await runExtractSlides();
-        downloadBlob(result.blob, result.outName);
+        // Do NOT download here — user edits in Notes Viewer and SAVE from there
 
         var file = new File([result.blob], result.outName, {
           type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -1248,11 +1248,11 @@
 
         setStatus(
           $("mergeStatus"),
-          "Downloaded “" +
+          "Opened Notes Viewer with “" +
             result.outName +
             "” (" +
             result.count +
-            " slides) and opened Notes Viewer" +
+            " slides). Edit notes, then SAVE there — no download yet" +
             (opened && opened.mode === "same-tab" ? " (this tab)." : "."),
           "ok"
         );
