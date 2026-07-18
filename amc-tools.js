@@ -13,15 +13,25 @@
   }
 
   function downloadBlob(blob, name) {
+    try {
+      // Prefer msSaveOrOpenBlob on legacy Edge
+      if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+        window.navigator.msSaveOrOpenBlob(blob, name);
+        return;
+      }
+    } catch (e) {}
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = name;
+    a.download = name || "download.pptx";
+    a.rel = "noopener";
+    a.style.display = "none";
     document.body.appendChild(a);
+    // Synchronous click inside user gesture chain (required by Brave/Edge)
     a.click();
     setTimeout(function () {
       URL.revokeObjectURL(a.href);
       a.remove();
-    }, 1200);
+    }, 2500);
   }
 
   /**
@@ -259,12 +269,16 @@
   }
 
   async function loadSourceFromFile(f) {
-    if (!f || !/\.pptx$/i.test(f.name)) return;
+    if (!f || !/\.pptx$/i.test(f.name || "")) return;
     setMergeSource(f);
-    var z = await JSZip.loadAsync(f);
+    var z = await JSZip.loadAsync(await readFileAsArrayBuffer(f));
     var c = slideNames(z).length;
+    if (!c) {
+      setStatus($("mergeStatus"), "Source has 0 slides — pick a different PPTX.", "err");
+      return;
+    }
     $("mergeSlides").value = "1-" + c;
-    setStatus($("mergeStatus"), "Source: " + c + " slides", "ok");
+    setStatus($("mergeStatus"), "Source: " + c + " slides — ready to Extract into blank target.", "ok");
   }
   async function loadTargetFromFile(f, handle) {
     if (!f || !/\.pptx$/i.test(f.name)) return;
@@ -561,148 +575,101 @@
   }
 
   /**
-   * Same cleanup as desktop AMC Pdf's modification (extract path):
-   * - Fix short "Source:" / "Note:" text boxes (margins, bullets, indent)
-   * - Strip watermark-like text shapes
-   * - Strip empty title placeholders and bare "Shape N" overlays when a picture exists
+   * Desktop AMC Pdf's modification cleanup — STRING ONLY (no DOMParser).
+   * Browser DOM serialize breaks OOXML namespaces and kills pictures.
+   * Matches Python: fix Source:/Note:/short text box margins + bullets.
    */
   function cleanSlideXmlLikeDesktop(xml) {
     try {
-      var doc = new DOMParser().parseFromString(xml, "application/xml");
-      if (doc.getElementsByTagName("parsererror").length) return xml;
-
-      function shapeName(sp) {
-        var pr = localAll(sp, "cNvPr")[0];
-        return pr ? pr.getAttribute("name") || "" : "";
-      }
-      function shapeText(sp) {
-        return localAll(sp, "t")
-          .map(function (t) {
-            return t.textContent || "";
-          })
-          .join("");
-      }
-      function removeEl(el) {
-        if (el && el.parentNode) el.parentNode.removeChild(el);
+      if (!xml) return xml;
+      var lower = xml.toLowerCase();
+      // Desktop only rewrites boxes that contain Source:/Note: or short text.
+      // Without DOM we only auto-fix when Source:/Note: appear (safe for AMC).
+      if (lower.indexOf("source:") < 0 && lower.indexOf("note:") < 0) {
+        return xml;
       }
 
-      var pics = localAll(doc, "pic");
-      var hasPic = pics.length > 0;
-
-      // Remove watermark / citation text shapes (and empty title shells when a photo is present)
-      localAll(doc, "sp").forEach(function (sp) {
-        var text = shapeText(sp);
-        var low = text.toLowerCase().replace(/\s+/g, " ").trim();
-        var name = shapeName(sp);
-
-        // Watermark / footer / URL chrome (do NOT remove Source:/Note: — those are fixed below)
-        if (
-          /copyright|©|all rights reserved|confidential|watermark|amc\s*english|www\.|https?:\/\//i.test(
-            low
-          )
-        ) {
-          removeEl(sp);
-          return;
-        }
-
-        // Empty title placeholder sitting on image slides (常見 AMC: 標題 1)
-        if (hasPic && !low && /標題|title|placeholder/i.test(name)) {
-          removeEl(sp);
-          return;
-        }
-
-        // Bare "Shape 123" overlays with almost no text (often watermark chrome)
-        if (hasPic && /^Shape\s*\d+$/i.test(name) && low.length < 8) {
-          removeEl(sp);
-          return;
-        }
-      });
-
-      // Original desktop "fix" for short source/note-style boxes that remain
-      localAll(doc, "txBody").forEach(function (tb) {
-        var full = localAll(tb, "t")
-          .map(function (t) {
-            return t.textContent || "";
-          })
-          .join("")
-          .toLowerCase();
-        if (!(full.indexOf("source:") >= 0 || full.indexOf("note:") >= 0 || (full.length > 0 && full.length < 150))) {
-          return;
-        }
-        var bodyPr = null;
-        for (var i = 0; i < tb.childNodes.length; i++) {
-          var ch = tb.childNodes[i];
-          if (ch.nodeType === 1 && ch.localName === "bodyPr") bodyPr = ch;
-        }
-        if (bodyPr) {
-          ["lIns", "tIns", "rIns", "bIns"].forEach(function (a) {
-            if (bodyPr.getAttribute(a) != null) bodyPr.setAttribute(a, "0");
-          });
-        }
-        localAll(tb, "pPr").forEach(function (ppr) {
-          if (ppr.getAttribute("lvl")) ppr.setAttribute("lvl", "0");
-          ppr.removeAttribute("marL");
-          ppr.removeAttribute("indent");
-          if (ppr.getAttribute("algn")) ppr.setAttribute("algn", "l");
-          // remove bullet children
-          Array.prototype.slice.call(ppr.childNodes).forEach(function (c) {
-            if (c.nodeType !== 1) return;
-            if (/^bu/i.test(c.localName || "")) removeEl(c);
-          });
+      // bodyPr: zero existing insets
+      xml = xml.replace(/<a:bodyPr\b([^>]*?)(\/?>)/g, function (all, attrs, end) {
+        ["lIns", "tIns", "rIns", "bIns"].forEach(function (a) {
+          var re = new RegExp("\\s" + a + '="[^"]*"', "g");
+          if (re.test(attrs)) {
+            attrs = attrs.replace(re, " " + a + '="0"');
+          }
         });
+        return "<a:bodyPr" + attrs + end;
       });
 
-      var out = new XMLSerializer().serializeToString(doc);
-      out = out.replace(/\sxmlns=""/g, "");
-      // Keep a normal OOXML declaration
-      if (out.indexOf("<?xml") !== 0) {
-        out = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + out;
-      }
-      return out;
+      // pPr: lvl=0, drop marL/indent, algn=l
+      xml = xml.replace(/<a:pPr\b([^>]*?)(\/?>)/g, function (all, attrs, end) {
+        if (/\slvl="/.test(attrs)) attrs = attrs.replace(/\slvl="[^"]*"/g, ' lvl="0"');
+        attrs = attrs.replace(/\smarL="[^"]*"/g, "");
+        attrs = attrs.replace(/\sindent="[^"]*"/g, "");
+        if (/\salgn="/.test(attrs)) attrs = attrs.replace(/\salgn="[^"]*"/g, ' algn="l"');
+        return "<a:pPr" + attrs + end;
+      });
+
+      xml = xml.replace(
+        /<a:bu(?:None|SzPct|SzPts|Char|Blip|Font|Clr|FontTx|ClrTx)\b[^>]*\/>/g,
+        ""
+      );
+      xml = xml.replace(
+        /<a:bu(?:None|SzPct|SzPts|Char|Blip|Font|Clr|FontTx|ClrTx)\b[^>]*>[\s\S]*?<\/a:bu(?:None|SzPct|SzPts|Char|Blip|Font|Clr|FontTx|ClrTx)>/g,
+        ""
+      );
+      return xml;
     } catch (e) {
       console.warn("cleanSlideXmlLikeDesktop failed", e);
       return xml;
     }
   }
 
+  function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
   /**
-   * Original AMC workflow: clean selected source slides, insert into target
-   * (usually blank-target.pptx with 0 slides). Media remapped so pictures work.
+   * Exact port of desktop merge_presentations():
+   * clean selected source slides → insert into target (blank shell) → download.
+   * Media renamed with _src_ prefix (same as Python). No notes cloning.
    */
   async function mergePresentations(srcFile, tgtFile, nums, insertAfter) {
     var srcZip = await JSZip.loadAsync(await readFileAsArrayBuffer(srcFile));
     var tgtZip = await JSZip.loadAsync(await readFileAsArrayBuffer(tgtFile));
-    var srcSlides = slideNames(srcZip);
-    var tgtSlides = slideNames(tgtZip);
-    var tgtCount = tgtSlides.length;
+    var tgtCount = slideNames(tgtZip).length;
     if (insertAfter > tgtCount) insertAfter = tgtCount;
 
-    // Match target slide size to source (prevents stretch / repair quirks)
+    // Match target slide size to source
     try {
       var srcPrs = await srcZip.file("ppt/presentation.xml").async("string");
       var tgtPrs0 = await tgtZip.file("ppt/presentation.xml").async("string");
       var sz = srcPrs.match(/<p:sldSz\b[^/]*\/>/);
       if (sz) {
-        tgtPrs0 = tgtPrs0.replace(/<p:sldSz\b[^/]*\/>/, sz[0]);
+        if (/<p:sldSz\b[^/]*\/>/.test(tgtPrs0)) {
+          tgtPrs0 = tgtPrs0.replace(/<p:sldSz\b[^/]*\/>/, sz[0]);
+        }
         tgtZip.file("ppt/presentation.xml", tgtPrs0);
       }
     } catch (e) {}
 
-    // Media: prefix names so they never collide
-    // IMPORTANT: rename carefully — image1.jpeg must not match inside image11.jpeg
+    // Media: same as Python — _src_ + original name; longest-first remap
     var mediaMap = {};
-    var srcMedia = Object.keys(srcZip.files).filter(function (n) {
-      return n.indexOf("ppt/media/") === 0 && !srcZip.files[n].dir;
-    });
+    var srcMedia = Object.keys(srcZip.files)
+      .filter(function (n) {
+        return n.indexOf("ppt/media/") === 0 && !srcZip.files[n].dir;
+      })
+      .sort();
     for (var mi = 0; mi < srcMedia.length; mi++) {
       var mp = srcMedia[mi];
       var base = mp.split("/").pop();
-      // Unique name that cannot be a prefix of another image name
-      var newBase = "x" + mi + "_" + base;
+      var dot = base.lastIndexOf(".");
+      var stem = dot >= 0 ? base.slice(0, dot) : base;
+      var ext = dot >= 0 ? base.slice(dot) : "";
+      var newBase = "_src_" + base;
       var newPath = "ppt/media/" + newBase;
       var c = 1;
       while (tgtZip.file(newPath)) {
-        newBase = "x" + mi + "_" + c + "_" + base;
+        newBase = "_src_" + stem + "_" + c + ext;
         newPath = "ppt/media/" + newBase;
         c++;
       }
@@ -710,32 +677,48 @@
       mediaMap[base] = newBase;
     }
 
-    function escapeRegExp(s) {
-      return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-
-    function remapMediaInText(text) {
+    function remapMedia(text) {
       if (!text) return text;
-      // Longest names first so image11.jpeg is not partially matched as image1.jpeg
-      var keys = Object.keys(mediaMap).sort(function (a, b) {
-        return b.length - a.length;
-      });
-      keys.forEach(function (oldN) {
-        var neu = mediaMap[oldN];
-        var esc = escapeRegExp(oldN);
-        // ../media/name or /media/name — only full filename before " ? # or end
-        text = text.replace(
-          new RegExp("(\\.\\./media/|/media/|media/)" + esc + '(?=["\'?#\\s>]|$)', "g"),
-          "$1" + neu
-        );
-        // Target="image1.jpeg"
-        text = text.replace(new RegExp('(Target=")' + esc + '(")', "g"), "$1" + neu + "$2");
-      });
+      // Only rewrite media paths (never bare filename — avoids corrupting _src_image1 etc.)
+      Object.keys(mediaMap)
+        .sort(function (a, b) {
+          return b.length - a.length;
+        })
+        .forEach(function (oldN) {
+          var neu = mediaMap[oldN];
+          text = text.split("../media/" + oldN).join("../media/" + neu);
+          text = text.split("/media/" + oldN).join("/media/" + neu);
+        });
       return text;
     }
 
-    // Ensure Content_Types has image defaults (blank shell may lack some)
-    function ensureImageContentTypes(ctXml) {
+    /**
+     * Content_Types must stay valid XML. Never rewrite the <Types> opening tag
+     * (that used to stack xmlns= and PowerPoint then refuses the file).
+     */
+    function sanitizeContentTypes(ctXml) {
+      // Collapse duplicate xmlns on <Types ...>
+      ctXml = ctXml.replace(
+        /<Types(?:\s+xmlns="[^"]*")+/g,
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
+      );
+      // Ensure single xmlns and clean close of open tag
+      if (!/^[\s\S]*<Types\s+xmlns=/.test(ctXml)) {
+        ctXml = ctXml.replace(
+          /<Types\b/,
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
+        );
+      }
+      // Normalize: <Types xmlns="..."  other?> → keep one xmlns only if mangled
+      ctXml = ctXml.replace(
+        /<Types\s+xmlns="http:\/\/schemas\.openxmlformats\.org\/package\/2006\/content-types"\s+xmlns="[^"]*"/g,
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
+      );
+      return ctXml;
+    }
+
+    function ensureImageDefaults(ctXml) {
+      ctXml = sanitizeContentTypes(ctXml);
       var defaults = {
         png: "image/png",
         jpg: "image/jpeg",
@@ -747,35 +730,23 @@
         bin: "application/octet-stream",
       };
       Object.keys(defaults).forEach(function (ext) {
-        var re = new RegExp('Extension="' + ext + '"', "i");
-        if (!re.test(ctXml)) {
+        if (!new RegExp('Extension="' + ext + '"', "i").test(ctXml)) {
+          // Append before </Types> only — never touch the opening <Types> tag
           ctXml = ctXml.replace(
-            "<Types",
-            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
-          );
-          // If xmlns already on Types, simple insert Default after <Types...>
-          ctXml = ctXml.replace(
-            /(<Types[^>]*>)/,
-            '$1<Default Extension="' + ext + '" ContentType="' + defaults[ext] + '"/>'
+            "</Types>",
+            '<Default Extension="' +
+              ext +
+              '" ContentType="' +
+              defaults[ext] +
+              '"/></Types>'
           );
         }
       });
       return ctXml;
     }
 
-    // Light cleanup — do NOT use DOM (breaks namespaces / images)
-    function repairSlideXml(xml) {
-      return xml;
-    }
-
-    var addedMeta = []; // {newNum, rid, id}
+    var addedMeta = [];
     var nextSlideNum = tgtCount + 1;
-    var notesCounter = 1;
-    // find max existing notesSlide number in target
-    Object.keys(tgtZip.files).forEach(function (n) {
-      var m = n.match(/^ppt\/notesSlides\/notesSlide(\d+)\.xml$/);
-      if (m) notesCounter = Math.max(notesCounter, parseInt(m[1], 10) + 1);
-    });
 
     for (var i = 0; i < nums.length; i++) {
       var sn = nums[i];
@@ -787,9 +758,10 @@
       var nsp = "ppt/slides/slide" + newNum + ".xml";
       var nrp = "ppt/slides/_rels/slide" + newNum + ".xml.rels";
 
-      // Slide XML uses r:embed only — clean watermarks / source-note boxes (desktop app behavior)
       var xml = await srcZip.file(sp).async("string");
       xml = cleanSlideXmlLikeDesktop(xml);
+      // Desktop also remaps media paths inside slide XML (usually only in rels)
+      xml = remapMedia(xml);
       if (xml.indexOf("<?xml") !== 0) {
         xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
       }
@@ -797,58 +769,21 @@
 
       if (srcZip.file(rp)) {
         var rels = await srcZip.file(rp).async("string");
-        // Relationships hold Target="../media/imageN.jpeg" — remap filenames here
-        rels = remapMediaInText(rels);
-
-        // Copy notes slide if linked
-        var notesMatch = rels.match(
-          /Target="([^"]*notesSlides\/notesSlide\d+\.xml)"/i
+        rels = remapMedia(rels);
+        // Drop notes relationships — desktop does not copy notes; blank has no notesMaster
+        rels = rels.replace(
+          /<Relationship\b[^>]*notesSlide[^>]*\/>/gi,
+          ""
         );
-        if (notesMatch) {
-          var notesTarget = notesMatch[1].replace(/^\.\.\//, "ppt/");
-          if (notesTarget.indexOf("ppt/") !== 0) {
-            notesTarget = "ppt/notesSlides/" + notesTarget.split("/").pop();
-          }
-          if (srcZip.file(notesTarget)) {
-            var newNotesName = "notesSlide" + notesCounter + ".xml";
-            var newNotesPath = "ppt/notesSlides/" + newNotesName;
-            var notesXml = await srcZip.file(notesTarget).async("string");
-            notesXml = remapMediaInText(notesXml);
-            if (notesXml.indexOf("<?xml") !== 0) {
-              notesXml =
-                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + notesXml;
-            }
-            tgtZip.file(newNotesPath, notesXml);
-
-            // notes rels
-            var oldNotesRels =
-              "ppt/notesSlides/_rels/" + notesTarget.split("/").pop() + ".rels";
-            var newNotesRels = "ppt/notesSlides/_rels/" + newNotesName + ".rels";
-            if (srcZip.file(oldNotesRels)) {
-              var nr = await srcZip.file(oldNotesRels).async("string");
-              nr = remapMediaInText(nr);
-              // point slide target to new slide number
-              nr = nr.replace(
-                /Target="[^"]*slide\d+\.xml"/g,
-                'Target="../slides/slide' + newNum + '.xml"'
-              );
-              tgtZip.file(newNotesRels, nr);
-            }
-
-            rels = rels.replace(
-              /Target="[^"]*notesSlides\/notesSlide\d+\.xml"/gi,
-              'Target="../notesSlides/' + newNotesName + '"'
-            );
-            notesCounter++;
-          }
-        }
-
+        rels = rels.replace(
+          /<Relationship\b[^>]*notesSlide[^>]*>[\s\S]*?<\/Relationship>/gi,
+          ""
+        );
         if (rels.indexOf("<?xml") !== 0) {
           rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + rels;
         }
         tgtZip.file(nrp, rels);
       } else {
-        // minimal rels so PowerPoint is happy
         tgtZip.file(
           nrp,
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
@@ -859,9 +794,13 @@
       addedMeta.push({ newNum: newNum });
     }
 
-    if (!addedMeta.length) throw new Error("No slides were copied (check slide numbers).");
+    if (!addedMeta.length) {
+      throw new Error(
+        "No slides were copied. Check slide numbers (source may use different numbering)."
+      );
+    }
 
-    // --- presentation.xml.rels: append slide relationships (string) ---
+    // presentation.xml.rels — append slide relationships
     var prsRelsXml = await tgtZip.file("ppt/_rels/presentation.xml.rels").async("string");
     var maxRid = 0;
     prsRelsXml.replace(/Id="rId(\d+)"/g, function (_, n) {
@@ -880,7 +819,7 @@
       );
     });
     if (prsRelsXml.indexOf("</Relationships>") < 0) {
-      throw new Error("Invalid presentation.xml.rels");
+      throw new Error("Invalid presentation.xml.rels in target");
     }
     prsRelsXml = prsRelsXml.replace(
       "</Relationships>",
@@ -888,50 +827,61 @@
     );
     tgtZip.file("ppt/_rels/presentation.xml.rels", prsRelsXml);
 
-    // --- presentation.xml sldIdLst (string) ---
+    // presentation.xml sldIdLst
     var prsXml = await tgtZip.file("ppt/presentation.xml").async("string");
     var maxId = 255;
+    prsXml.replace(/id="(\d+)"/g, function (m, n) {
+      // only track sldId ids when possible
+      return m;
+    });
     prsXml.replace(/<p:sldId\b[^>]*\bid="(\d+)"/g, function (_, n) {
       maxId = Math.max(maxId, parseInt(n, 10));
       return _;
     });
+
     var newSldTags = addedMeta.map(function (meta, idx) {
       meta.id = maxId + idx + 1;
       return '<p:sldId id="' + meta.id + '" r:id="' + meta.rid + '"/>';
     });
 
-    // existing sldId tags in order
     var existingTags = [];
     prsXml.replace(/<p:sldId\b[^/]*\/>/g, function (tag) {
       existingTags.push(tag);
       return tag;
     });
 
-    var ordered = existingTags
-      .slice(0, insertAfter)
-      .concat(newSldTags)
-      .concat(existingTags.slice(insertAfter));
+    // Desktop: append new slides then re-order if insert_after < tgt_count
+    var ordered;
+    if (insertAfter < tgtCount && existingTags.length) {
+      ordered = existingTags
+        .slice(0, insertAfter)
+        .concat(newSldTags)
+        .concat(existingTags.slice(insertAfter));
+    } else {
+      ordered = existingTags.concat(newSldTags);
+    }
     var newList = "<p:sldIdLst>" + ordered.join("") + "</p:sldIdLst>";
 
-    if (/<p:sldIdLst\/>/.test(prsXml)) {
-      prsXml = prsXml.replace(/<p:sldIdLst\/>/, newList);
-    } else if (/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/.test(prsXml)) {
-      prsXml = prsXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, newList);
-    } else {
-      // insert after sldMasterIdLst
+    if (/<p:sldIdLst\s*\/>/.test(prsXml)) {
+      prsXml = prsXml.replace(/<p:sldIdLst\s*\/>/, newList);
+    } else if (/<p:sldIdLst[\s>][\s\S]*?<\/p:sldIdLst>/.test(prsXml)) {
+      prsXml = prsXml.replace(/<p:sldIdLst[\s>][\s\S]*?<\/p:sldIdLst>/, newList);
+    } else if (/<\/p:sldMasterIdLst>/.test(prsXml)) {
       prsXml = prsXml.replace(
         /<\/p:sldMasterIdLst>/,
         "</p:sldMasterIdLst>" + newList
       );
+    } else {
+      throw new Error("Could not insert sldIdLst into presentation.xml");
     }
     if (prsXml.indexOf("<?xml") !== 0) {
       prsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + prsXml;
     }
     tgtZip.file("ppt/presentation.xml", prsXml);
 
-    // --- Content_Types: image defaults + slide overrides (no DOM xmlns="") ---
+    // Content_Types (must remain parseable XML — PowerPoint rejects bad CT entirely)
     var ctXml = await tgtZip.file("[Content_Types].xml").async("string");
-    ctXml = ensureImageContentTypes(ctXml);
+    ctXml = ensureImageDefaults(ctXml);
     var ctAdds = [];
     addedMeta.forEach(function (meta) {
       var part = "/ppt/slides/slide" + meta.newNum + ".xml";
@@ -943,40 +893,83 @@
         );
       }
     });
-    Object.keys(tgtZip.files).forEach(function (n) {
-      var m = n.match(/^ppt\/notesSlides\/(notesSlide\d+)\.xml$/);
-      if (!m) return;
-      var part = "/ppt/notesSlides/" + m[1] + ".xml";
-      if (ctXml.indexOf('PartName="' + part + '"') < 0) {
-        ctAdds.push(
-          '<Override PartName="' +
-            part +
-            '" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>'
-        );
-      }
-    });
     if (ctAdds.length) {
       ctXml = ctXml.replace("</Types>", ctAdds.join("") + "</Types>");
     }
+    // Final sanitize + sanity check
+    ctXml = sanitizeContentTypes(ctXml);
+    if ((ctXml.match(/\sxmlns="/g) || []).length > 1) {
+      // Force a single clean Types root if still mangled
+      ctXml = ctXml.replace(
+        /<Types[^>]*>/,
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      );
+    }
+    if (ctXml.indexOf("</Types>") < 0) {
+      throw new Error("Content_Types.xml became invalid during merge.");
+    }
     tgtZip.file("[Content_Types].xml", ctXml);
 
-    var blob = await tgtZip.generateAsync({
-      type: "blob",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    // Prefer arraybuffer → Blob for broader browser compatibility
+    var ab = await tgtZip.generateAsync({
+      type: "arraybuffer",
       compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    });
+    if (!ab || ab.byteLength < 2000) {
+      throw new Error("Output file was empty — merge failed.");
+    }
+    var blob = new Blob([ab], {
+      type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     });
     return { blob: blob, count: addedMeta.length };
   }
 
-  // Load built-in blank target (must be deployed as blank-target.pptx next to this page)
+  function blankTargetFromB64() {
+    if (typeof window.AMC_BLANK_TARGET_B64 !== "string" || !window.AMC_BLANK_TARGET_B64) {
+      return null;
+    }
+    try {
+      var bin = atob(window.AMC_BLANK_TARGET_B64);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new File([bytes], "blank-target.pptx", {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+    } catch (e) {
+      console.warn("embedded blank decode failed", e);
+      return null;
+    }
+  }
+
+  // Load built-in blank target (fetch file, else embedded base64 — no network required)
   async function ensureBlankTarget() {
+    var lastErr = null;
+
+    // 1) Embedded base64 (always works, even offline / file://)
+    try {
+      var emb = blankTargetFromB64();
+      if (emb) {
+        await loadTargetFromFile(emb, null);
+        $("mergeTargetLabel").textContent = "blank-target.pptx (built-in)";
+        $("mergeInsert").value = "0";
+        setStatus(
+          $("mergeStatus"),
+          "Using built-in blank target. Choose a Source, then Extract.",
+          "ok"
+        );
+        return true;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+
+    // 2) Fetch blank-target.pptx next to this page
     var urls = ["blank-target.pptx", "./blank-target.pptx"];
-    // If site is under a repo path, also try relative to current folder
     try {
       urls.push(new URL("blank-target.pptx", location.href).href);
     } catch (e) {}
 
-    var lastErr = null;
     for (var i = 0; i < urls.length; i++) {
       try {
         var res = await fetch(urls[i], { cache: "no-cache" });
@@ -1002,7 +995,7 @@
     }
     setStatus(
       $("mergeStatus"),
-      "No target available — upload blank-target.pptx to your GitHub repo (same folder as index.html / amc-studio.html), then hard-refresh. Or click Target and pick any .pptx. (" +
+      "No blank target — click Target and pick any blank .pptx, or re-upload blank-target-data.js. (" +
         (lastErr && lastErr.message ? lastErr.message : "load failed") +
         ")",
       "err"
