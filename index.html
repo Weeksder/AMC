@@ -96,6 +96,14 @@
       margin-top: 16px;
     }
     .btn-amc:active { background: #2c5282; }
+    .btn-tools {
+      background: #3d4f66;
+      color: #fff;
+      width: 100%;
+      margin-top: 10px;
+      border: 1px solid var(--border);
+    }
+    .btn-tools:hover { background: #4a5f7a; }
     .status {
       margin-top: 18px;
       min-height: 1.4em;
@@ -114,6 +122,54 @@
       overflow: hidden;
       clip: rect(0,0,0,0);
     }
+    /* —— AMC tools section (below notes viewer) —— */
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 16px calc(40px + var(--safe-bottom));
+    }
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 36px 0 28px;
+    }
+    .amc-section-head {
+      margin: 0 0 8px;
+      font-size: 1.45rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    .amc-section-sub {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+    .amc-frame-wrap {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 8px 28px rgba(0,0,0,.25);
+    }
+    .amc-frame {
+      display: block;
+      width: 100%;
+      height: min(85vh, 900px);
+      min-height: 640px;
+      border: 0;
+      background: #f0f0f0;
+    }
+    .amc-open-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .amc-open-row a.btn {
+      width: auto;
+      min-width: 160px;
+    }
   </style>
 </head>
 <body>
@@ -129,8 +185,8 @@
       </div>
     </div>
 
-    <!-- Set your AMC Online class URL below in the script (AMC_ONLINE_CLASS_URL) -->
     <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Online Class</a>
+    <a class="btn btn-tools" href="amc-studio.html">AMC Productivity Studio (full page)</a>
 
     <div class="file-input-wrap">
       <input
@@ -141,6 +197,27 @@
     </div>
 
     <p class="status" id="status"></p>
+  </div>
+
+  <!-- AMC tools embedded below notes viewer -->
+  <div class="page">
+    <hr class="divider">
+    <h2 class="amc-section-head">AMC Productivity Studio</h2>
+    <p class="amc-section-sub">
+      Text extractor, slide merge, image strip, special strip, and text formatter
+      (web version of AMC Pdf’s modification).
+    </p>
+    <div class="amc-open-row">
+      <a class="btn btn-tools" href="amc-studio.html" target="_blank" rel="noopener">Open in new tab</a>
+    </div>
+    <div class="amc-frame-wrap">
+      <iframe
+        class="amc-frame"
+        src="amc-studio.html"
+        title="AMC Productivity Studio tools"
+        loading="lazy"
+      ></iframe>
+    </div>
   </div>
 
   <script src="jszip.min.js"></script>

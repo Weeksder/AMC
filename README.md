@@ -49,21 +49,34 @@ README.md
 - Notes edits are stored in **that browser** (localStorage) only.
 - To continue on another device: open the same `.pptx` again (or export later if you add that).
 
+## Pages in this folder
+
+| File | What it is |
+|------|------------|
+| `index.html` | Home: Notes Viewer + AMC tools section below |
+| `viewer.html` | Notes viewer tab |
+| `amc-studio.html` | **Separate** full-page AMC Productivity Studio |
+| `amc-tools.js` / `amc-tools.css` | AMC tools logic & styles |
+| `jszip.min.js` | Shared PPTX zip library |
+| `pptx-loader.js` / `viewer.js` / `viewer.css` | Notes viewer |
+
+Upload **all** of these files to GitHub Pages (including **`blank-target.pptx`** — required for Slide Extractor).
+
 ## Features
 
-- Thumbnails (resize by dragging the edge or scrolling sideways)
-- Main slide + editable notes
-- Hide picture / hide tools
-- Open another `.pptx` (new tab on desktop; same tab on iPhone/iPad for reliability)
-- Soft line breaks and bold from PowerPoint notes
-- **Safari / iPhone / iPad:** open from **Files**, **iCloud Drive**, Downloads, or other cloud apps via Browse
+### Notes Viewer
+- Open `.pptx`, thumbs + notes, SAVE as `.pptx`
+- Hide picture / tools, AMC Online Class link
+
+### AMC Productivity Studio (below on home, or `amc-studio.html`)
+- Text Extractor (image OCR)
+- PPTX Slide Extractor (merge slides)
+- Image Stripper
+- Special Strip
+- Text Formatter
 
 ## Apple devices
 
 1. Open the site in **Safari**
-2. Tap **Open file**
-3. Tap **Browse**
-4. Choose **iCloud Drive**, **On My iPhone/iPad**, **Downloads**, Google Drive, OneDrive, etc.
-5. Select a **.pptx** file
-
-On iPhone/iPad the viewer usually opens **in the same tab** (Safari blocks many pop-ups). On Mac/desktop it prefers a **new tab**.
+2. Tap **Open file** for notes, or use AMC tools below
+3. On iPhone/iPad the notes viewer usually stays **in this tab**
