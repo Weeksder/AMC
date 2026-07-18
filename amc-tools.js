@@ -269,12 +269,15 @@
   async function loadTargetFromFile(f, handle) {
     if (!f || !/\.pptx$/i.test(f.name)) return;
     setMergeTarget(f, handle);
-    var z = await JSZip.loadAsync(f);
+    var z = await JSZip.loadAsync(await readFileAsArrayBuffer(f));
     var c = slideNames(z).length;
+    // Blank shell (0 slides) → insert at start; otherwise append after last slide
     $("mergeInsert").value = String(c);
-    var msg = "Target: " + c + " slides";
-    if (handle) msg += " — Chrome/Edge can overwrite this file on Extract";
-    else msg += " — result will download (browser cannot silently overwrite)";
+    var msg =
+      c === 0
+        ? "Target: blank (0 slides) — cleaned source slides will be inserted"
+        : "Target: " + c + " slides — cleaned source slides will be inserted after #" + c;
+    msg += " (result downloads; browser cannot silently overwrite)";
     setStatus($("mergeStatus"), msg, "ok");
   }
 
@@ -592,9 +595,9 @@
         var low = text.toLowerCase().replace(/\s+/g, " ").trim();
         var name = shapeName(sp);
 
-        // Explicit watermark / footer / source lines
+        // Watermark / footer / URL chrome (do NOT remove Source:/Note: — those are fixed below)
         if (
-          /source\s*:|note\s*:|copyright|©|all rights reserved|confidential|watermark|amc\s*english|www\.|https?:\/\//i.test(
+          /copyright|©|all rights reserved|confidential|watermark|amc\s*english|www\.|https?:\/\//i.test(
             low
           )
         ) {
@@ -663,11 +666,12 @@
   }
 
   /**
-   * LEGACY merge into another deck (optional). Prefer extractSlidesFromSource.
+   * Original AMC workflow: clean selected source slides, insert into target
+   * (usually blank-target.pptx with 0 slides). Media remapped so pictures work.
    */
   async function mergePresentations(srcFile, tgtFile, nums, insertAfter) {
-    var srcZip = await JSZip.loadAsync(srcFile);
-    var tgtZip = await JSZip.loadAsync(tgtFile);
+    var srcZip = await JSZip.loadAsync(await readFileAsArrayBuffer(srcFile));
+    var tgtZip = await JSZip.loadAsync(await readFileAsArrayBuffer(tgtFile));
     var srcSlides = slideNames(srcZip);
     var tgtSlides = slideNames(tgtZip);
     var tgtCount = tgtSlides.length;
@@ -783,9 +787,9 @@
       var nsp = "ppt/slides/slide" + newNum + ".xml";
       var nrp = "ppt/slides/_rels/slide" + newNum + ".xml.rels";
 
-      // Slide XML uses r:embed="rIdN" only — do not rename strings inside slide XML
+      // Slide XML uses r:embed only — clean watermarks / source-note boxes (desktop app behavior)
       var xml = await srcZip.file(sp).async("string");
-      xml = repairSlideXml(xml);
+      xml = cleanSlideXmlLikeDesktop(xml);
       if (xml.indexOf("<?xml") !== 0) {
         xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
       }
@@ -1017,8 +1021,18 @@
     }
     var btn = $("mergeGo");
     btn.disabled = true;
-    setStatus($("mergeStatus"), "Extracting slides + cleaning watermarks…");
+    setStatus($("mergeStatus"), "Cleaning + inserting into blank target…");
     try {
+      // Original success path: always have a target (built-in blank if none chosen)
+      if (!mergeTargetFile) {
+        var ok = await ensureBlankTarget();
+        if (!ok || !mergeTargetFile) {
+          throw new Error(
+            "No blank target. Upload blank-target.pptx next to amc-studio.html on GitHub, or click Target and pick a blank .pptx."
+          );
+        }
+      }
+
       var probe = await JSZip.loadAsync(await readFileAsArrayBuffer(mergeSourceFile));
       var srcCount = slideNames(probe).length;
       if (!srcCount) throw new Error("No slides found in source file.");
@@ -1035,9 +1049,18 @@
         );
       }
 
-      var result = await extractSlidesFromSource(mergeSourceFile, nums);
+      var insertAfter = parseInt(($("mergeInsert") && $("mergeInsert").value) || "0", 10);
+      if (isNaN(insertAfter) || insertAfter < 0) insertAfter = 0;
 
-      // Always force a real download with a NEW name (Brave/Edge: no silent overwrite)
+      // Strip/clean source slides → insert into blank (or chosen) target
+      var result = await mergePresentations(
+        mergeSourceFile,
+        mergeTargetFile,
+        nums,
+        insertAfter
+      );
+
+      // Always download a NEW name (Brave/Edge: no silent overwrite of the target path)
       var stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       var base = (mergeSourceFile.name || "slides").replace(/\.pptx$/i, "");
       var outName = base + "_extracted_" + stamp + ".pptx";
@@ -1048,9 +1071,7 @@
           outName +
           "” (" +
           result.count +
-          " of " +
-          result.totalInSource +
-          " slides, cleaned). Check Downloads.",
+          " slides cleaned + put into blank target). Check Downloads.",
         "ok"
       );
     } catch (e) {
@@ -1060,16 +1081,18 @@
     btn.disabled = false;
   });
 
-  if ($("mergeTargetLabel")) {
-    $("mergeTargetLabel").textContent = "Not needed (extract from Source only)";
-  }
+  // Preload built-in blank target (0-slide shell) — original desktop workflow
   if ($("mergeStatus")) {
     setStatus(
       $("mergeStatus"),
-      "1) Choose Source  2) Set slides (e.g. 1-10)  3) Extract — file goes to Downloads.",
+      "Loading blank target… then: 1) Source  2) Slides  3) Extract.",
       "ok"
     );
   }
+  ensureBlankTarget().then(function (ok) {
+    if (ok) return;
+    // ensureBlankTarget already set an error status
+  });
 
   // ---- Image strip ----
   var stripFiles = [];
