@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#e8e8e8">
   <meta name="format-detection" content="telephone=no">
   <title>Notes Viewer</title>
-  <link rel="stylesheet" href="viewer.css?v=20260718o">
+  <link rel="stylesheet" href="viewer.css?v=20260718p">
 </head>
 <body>
   <div class="empty-state" id="emptyState">
@@ -51,23 +51,23 @@
             <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
             <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
             <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
-            <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+            <button type="button" data-cmd="insertUnorderedList" title="Bullet list">•</button>
+            <button type="button" id="btnSplitLine" title="Insert split line">──</button>
             <button type="button" id="btnResetNotes" title="Restore original notes">Reset</button>
           </div>
           <div class="view-toggles">
-            <button type="button" id="btnTogglePicture" title="Hide or show main slide">Hide picture</button>
-            <button type="button" id="btnToggleTools" title="Hide or show formatting tools">Hide tools</button>
-            <button type="button" id="btnSaveJson" title="Download PowerPoint with your speaker notes written into the file">SAVE</button>
+            <button type="button" id="btnTogglePicture" title="Hide or show main slide">Picture</button>
+            <button type="button" id="btnToggleTools" title="Hide or show formatting tools">Tools</button>
+            <button type="button" id="btnSaveJson" title="Download PowerPoint with your speaker notes">SAVE</button>
+            <button type="button" id="btnOpen" title="Open a PowerPoint">Open</button>
             <button type="button" id="btnViewerHelp" title="Help" aria-label="Help">?</button>
             <button type="button" id="btnHome" title="Home page">Home</button>
+            <input type="file" id="openFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/octet-stream" hidden>
           </div>
           <div class="nav">
             <button type="button" id="btnPrev" title="Previous">◀</button>
-            <span id="pageCurrent" style="font-size:12px;color:#666;min-width:1.2em;text-align:center"></span>
-            <button type="button" id="btnOpen" title="Open a PowerPoint in a new tab">Open</button>
-            <span id="pageTotal" style="font-size:12px;color:#666;min-width:1.2em;text-align:center"></span>
+            <span class="page-indicator" id="pageIndicator"><span id="pageCurrent">1</span>/<span id="pageTotal">1</span></span>
             <button type="button" id="btnNext" title="Next">▶</button>
-            <input type="file" id="openFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/octet-stream" hidden>
           </div>
         </div>
         <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"
@@ -76,8 +76,8 @@
     </section>
   </div>
 
-  <script src="jszip.min.js?v=20260718o"></script>
-  <script src="pptx-loader.js?v=20260718o"></script>
-  <script src="viewer.js?v=20260718o"></script>
+  <script src="jszip.min.js?v=20260718p"></script>
+  <script src="pptx-loader.js?v=20260718p"></script>
+  <script src="viewer.js?v=20260718p"></script>
 </body>
 </html>

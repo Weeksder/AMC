@@ -418,6 +418,31 @@
     document.execCommand(btn.dataset.cmd, false, null);
     saveCurrentNotes();
   });
+
+  // Insert a horizontal split line (desktop notes separator style)
+  var btnSplitLine = document.getElementById("btnSplitLine");
+  if (btnSplitLine) {
+    btnSplitLine.addEventListener("click", function (e) {
+      e.preventDefault();
+      notesBody.focus();
+      // Clear empty placeholder first
+      var empty = notesBody.querySelector("p.empty-notes");
+      if (empty) notesBody.innerHTML = "";
+      var sep =
+        '<p><br></p><hr class="notes-sep"><p><br></p>';
+      var ok = false;
+      try {
+        ok = document.execCommand("insertHTML", false, sep);
+      } catch (err) {
+        ok = false;
+      }
+      if (!ok) {
+        notesBody.innerHTML = (notesBody.innerHTML || "") + sep;
+      }
+      saveCurrentNotes();
+    });
+  }
+
   btnResetNotes.addEventListener("click", function () {
     if (!confirm("Reset notes for this slide to the original from the PowerPoint?")) return;
     try {
@@ -459,7 +484,7 @@
 
   function setHidePicture(hidden) {
     appEl.classList.toggle("hide-picture", !!hidden);
-    btnTogglePicture.textContent = hidden ? "Show picture" : "Hide picture";
+    btnTogglePicture.textContent = hidden ? "Show pic" : "Picture";
     btnTogglePicture.classList.toggle("on", hidden);
     try {
       localStorage.setItem(STORAGE_PREFIX + "hidePicture", hidden ? "1" : "0");
@@ -468,7 +493,7 @@
   }
   function setHideTools(hidden) {
     appEl.classList.toggle("hide-tools", !!hidden);
-    btnToggleTools.textContent = hidden ? "Show tools" : "Hide tools";
+    btnToggleTools.textContent = hidden ? "Show tools" : "Tools";
     btnToggleTools.classList.toggle("on", hidden);
     try {
       localStorage.setItem(STORAGE_PREFIX + "hideTools", hidden ? "1" : "0");
@@ -553,8 +578,7 @@
   openFileInput.addEventListener("change", async function () {
     const f = openFileInput.files && openFileInput.files[0];
     if (!f) return;
-    btnOpen.disabled = true;
-    btnOpen.textContent = "…";
+    if (btnOpen) btnOpen.disabled = true;
     var pre = null;
     var apple = PptxNotesLoader.isAppleMobile && PptxNotesLoader.isAppleMobile();
     if (!apple) pre = PptxNotesLoader.openPlaceholderTab && PptxNotesLoader.openPlaceholderTab();
@@ -575,8 +599,7 @@
       }
       alert(err && err.message ? err.message : String(err));
     }
-    btnOpen.disabled = false;
-    btnOpen.textContent = "Open";
+    if (btnOpen) btnOpen.disabled = false;
   });
 
   function loadPrefs() {

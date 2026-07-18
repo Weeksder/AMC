@@ -206,9 +206,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: wrap;
-  padding: 6px 12px;
+  padding: 3px 8px;
   border-bottom: 1px solid #e0e0e0;
   flex-shrink: 0;
   background: #fafafa;
@@ -218,20 +218,22 @@ html, body {
 .notes-bar .fmt,
 .view-toggles {
   display: flex;
-  gap: 6px;
+  gap: 3px;
   align-items: center;
   flex-wrap: wrap;
 }
 .notes-bar button {
   border: 1px solid var(--border);
   background: #fff;
-  border-radius: 4px;
-  padding: 6px 10px;
-  font-size: 13px;
+  border-radius: 3px;
+  padding: 2px 7px;
+  font-size: 12px;
+  line-height: 1.2;
   cursor: pointer;
   color: #333;
-  min-width: 32px;
-  min-height: 36px;
+  min-width: 22px;
+  min-height: 24px;
+  height: 24px;
   touch-action: manipulation;
   -webkit-appearance: none;
   appearance: none;
@@ -243,52 +245,81 @@ html, body {
   border-color: #8ab4f8;
 }
 .notes-bar .spacing-ctl { display: flex; gap: 2px; }
+.notes-bar .page-indicator {
+  font-size: 11px;
+  color: #666;
+  min-width: 2.4em;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 1;
+  padding: 0 2px;
+}
+.notes-bar .save-status {
+  font-size: 10px;
+}
 .notes-body {
   overflow-y: auto;
-  padding: 10px 18px 18px;
-  font-size: 15px;
+  padding: 8px 16px 16px;
+  /* Desktop PowerPoint notes feel — not Google Docs */
+  font-family: Calibri, "Segoe UI", Candara, Arial, sans-serif;
+  font-size: 14px;
   line-height: var(--notes-line-height);
+  color: #000;
   flex: 1;
   min-height: 0;
   outline: none;
+  word-wrap: break-word;
 }
 .notes-body:focus {
   box-shadow: inset 0 0 0 2px rgba(227,108,10,.25);
 }
-.notes-body p {
+/* One line per paragraph — no Google-style nested divs spacing */
+.notes-body p,
+.notes-body div {
   margin: 0 0 var(--notes-para-gap);
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  line-height: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
 }
 .notes-body p.notes-blank {
   margin: 0 0 var(--notes-blank-gap);
-  min-height: 0;
-  line-height: 0.85;
+  min-height: 0.9em;
+  line-height: inherit;
 }
-.notes-body p.notes-bullet { position: relative; }
+.notes-body p.notes-bullet { position: relative; padding-left: 0; }
 .notes-body p.notes-bullet::before {
   content: "•";
   display: inline-block;
   width: 1em;
   margin-left: -0.15em;
-  color: #555;
+  color: #333;
 }
-.notes-body h3.notes-h {
-  margin: calc(var(--notes-para-gap) * 3 + 4px) 0 calc(var(--notes-para-gap) + 2px);
-  font-size: 16px;
-  font-weight: 700;
-  color: #222;
-  line-height: 1.2;
-}
-.notes-body h3.notes-h:first-child { margin-top: 0; }
 .notes-body hr.notes-sep {
   border: none;
-  border-top: 2px solid #ccc;
-  margin: calc(var(--notes-para-gap) * 3 + 4px) 0;
+  border-top: 1px solid #999;
+  margin: 6px 0;
 }
 .notes-body .empty-notes {
   color: var(--muted);
   font-style: italic;
 }
-.notes-body strong { font-weight: 700; }
+.notes-body strong,
+.notes-body b { font-weight: 700; }
+.notes-body em,
+.notes-body i { font-style: italic; }
+/* Kill pasted inline styles from Docs/Slides/ChatGPT */
+.notes-body span,
+.notes-body font {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  color: inherit !important;
+  background: transparent !important;
+}
 
 .app.hide-picture .slide-pane,
 .app.hide-picture .splitter { display: none !important; }
@@ -319,6 +350,13 @@ html, body {
 }
 .save-status.show { display: inline; }
 
-@media (max-width: 800px) {
-  .notes-body { font-size: 14px; padding: 10px 12px 20px; }
+@media (max-width: 900px) {
+  .notes-bar { padding: 2px 6px; gap: 3px; }
+  .notes-bar button {
+    padding: 1px 5px;
+    font-size: 11px;
+    min-height: 22px;
+    height: 22px;
+  }
+  .notes-body { font-size: 13px; padding: 8px 10px 14px; }
 }
