@@ -452,107 +452,162 @@
       .replace(/"/g, "&quot;");
   }
 
-  /** notesHtml → OOXML paragraph fragments for a:txBody */
+  /**
+   * notesHtml → OOXML paragraphs for a:txBody
+   * Desktop-style: ONE visual line = ONE <a:p> (not soft a:br inside a paragraph).
+   * That matches classic PowerPoint notes, not Google Slides / Docs paste.
+   */
   function notesHtmlToOoxmlParagraphs(notesHtml) {
     if (!notesHtml || !String(notesHtml).replace(/<[^>]+>/g, "").trim()) {
-      return "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>";
+      return '<a:p><a:endParaRPr lang="en-US" dirty="0"/></a:p>';
     }
+    if (typeof document === "undefined") {
+      // Fallback plain text (no DOM)
+      return String(notesHtml)
+        .replace(/<[^>]+>/g, "\n")
+        .split(/\r\n|\n|\r/)
+        .map(function (line) {
+          line = line.replace(/\s+/g, " ").trim();
+          if (!line) {
+            return '<a:p><a:br><a:rPr lang="en-US" dirty="0"/></a:br><a:endParaRPr lang="en-US" dirty="0"/></a:p>';
+          }
+          return (
+            '<a:p><a:r><a:rPr lang="en-US" dirty="0"/><a:t>' +
+            escapeXml(line) +
+            "</a:t></a:r></a:p>"
+          );
+        })
+        .join("");
+    }
+
     var wrap = document.createElement("div");
     wrap.innerHTML = notesHtml;
-    var parts = [];
 
-    function runsFromNode(node) {
-      var xml = "";
-      function walk(n, bold, italic, under) {
-        if (n.nodeType === 3) {
-          var t = n.nodeValue || "";
-          if (!t) return;
-          // a:t cannot be empty; preserve spaces
-          var rPr = ' lang="en-US" dirty="0"';
-          if (bold) rPr += ' b="1"';
-          if (italic) rPr += ' i="1"';
-          if (under) rPr += ' u="sng"';
-          xml += "<a:r><a:rPr" + rPr + "/><a:t>" + escapeXml(t) + "</a:t></a:r>";
-          return;
-        }
-        if (n.nodeType !== 1) return;
-        var tag = n.tagName.toLowerCase();
-        if (tag === "br") {
-          xml += "<a:br/>";
-          return;
-        }
-        var b = bold || tag === "strong" || tag === "b";
-        var i = italic || tag === "em" || tag === "i";
-        var u = under || tag === "u";
-        Array.prototype.forEach.call(n.childNodes, function (ch) {
-          walk(ch, b, i, u);
-        });
-      }
-      Array.prototype.forEach.call(node.childNodes, function (ch) {
-        walk(ch, false, false, false);
-      });
-      return xml;
+    // lines = array of run arrays: [{text, bold, italic, under}, ...]
+    var lines = [];
+    var current = [];
+
+    function flushLine() {
+      lines.push(current);
+      current = [];
     }
 
-    function emitBlock(el) {
-      var tag = el.tagName ? el.tagName.toLowerCase() : "";
-      if (tag === "hr") {
-        parts.push(
-          "<a:p><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>" +
-            escapeXml("===============================================") +
-            "</a:t></a:r></a:p>"
-        );
-        return;
-      }
-      if (tag === "br") {
-        parts.push("<a:p><a:endParaRPr lang=\"en-US\"/></a:p>");
-        return;
-      }
-      var level = 0;
-      if (el.getAttribute && el.getAttribute("data-level")) {
-        level = parseInt(el.getAttribute("data-level"), 10) || 0;
-      }
-      if (tag === "li") level = Math.max(level, 1);
-      var forceBold = tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4";
-      var inner = "";
-      if (forceBold) {
-        var plain = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (!plain) {
-          parts.push("<a:p><a:endParaRPr lang=\"en-US\"/></a:p>");
-          return;
+    function pushText(t, bold, italic, under) {
+      if (t == null || t === "") return;
+      // Real newlines in text (e.g. ChatGPT paste) → new paragraphs
+      var chunks = String(t).split(/\r\n|\n|\r/);
+      for (var i = 0; i < chunks.length; i++) {
+        if (i > 0) flushLine();
+        if (chunks[i].length) {
+          current.push({
+            text: chunks[i],
+            bold: !!bold,
+            italic: !!italic,
+            under: !!under,
+          });
         }
-        inner =
-          "<a:r><a:rPr lang=\"en-US\" dirty=\"0\" b=\"1\"/><a:t>" +
-          escapeXml(plain) +
-          "</a:t></a:r>";
-      } else {
-        inner = runsFromNode(el);
       }
-      if (!inner) {
-        parts.push("<a:p><a:endParaRPr lang=\"en-US\"/></a:p>");
-        return;
-      }
-      var pPr = level > 0 ? "<a:pPr lvl=\"" + level + "\"/>" : "<a:pPr/>";
-      parts.push("<a:p>" + pPr + inner + "</a:p>");
     }
 
-    Array.prototype.forEach.call(wrap.childNodes, function (n) {
+    function walk(n, bold, italic, under) {
       if (n.nodeType === 3) {
-        var t = (n.nodeValue || "").trim();
-        if (t) {
-          parts.push(
-            "<a:p><a:pPr/><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>" +
-              escapeXml(t) +
-              "</a:t></a:r></a:p>"
+        pushText(n.nodeValue, bold, italic, under);
+        return;
+      }
+      if (n.nodeType !== 1) return;
+      var tag = n.tagName.toLowerCase();
+      if (tag === "br") {
+        flushLine();
+        return;
+      }
+      if (tag === "hr") {
+        if (current.length) flushLine();
+        current.push({
+          text: "===============================================",
+          bold: false,
+          italic: false,
+          under: false,
+        });
+        flushLine();
+        return;
+      }
+      // Skip empty-notes placeholder
+      if (tag === "p" && n.classList && n.classList.contains("empty-notes")) {
+        return;
+      }
+      var isBlock =
+        tag === "p" ||
+        tag === "div" ||
+        tag === "li" ||
+        tag === "h1" ||
+        tag === "h2" ||
+        tag === "h3" ||
+        tag === "h4" ||
+        tag === "tr" ||
+        tag === "blockquote";
+      if (isBlock && current.length) flushLine();
+      var b =
+        bold ||
+        tag === "strong" ||
+        tag === "b" ||
+        tag === "h1" ||
+        tag === "h2" ||
+        tag === "h3" ||
+        tag === "h4";
+      var it = italic || tag === "em" || tag === "i";
+      var u = under || tag === "u";
+      Array.prototype.forEach.call(n.childNodes, function (ch) {
+        walk(ch, b, it, u);
+      });
+      if (isBlock) flushLine();
+    }
+
+    Array.prototype.forEach.call(wrap.childNodes, function (ch) {
+      walk(ch, false, false, false);
+    });
+    if (current.length) flushLine();
+
+    // Drop trailing blank lines
+    while (lines.length && lines[lines.length - 1].length === 0) lines.pop();
+
+    if (!lines.length) {
+      return '<a:p><a:endParaRPr lang="en-US" dirty="0"/></a:p>';
+    }
+
+    return lines
+      .map(function (runs) {
+        // Blank line — same pattern as desktop PowerPoint notes
+        if (!runs.length) {
+          return (
+            '<a:p><a:br><a:rPr lang="en-US" dirty="0"/></a:br>' +
+            '<a:endParaRPr lang="en-US" dirty="0"/></a:p>'
           );
         }
-        return;
-      }
-      if (n.nodeType === 1) emitBlock(n);
-    });
-
-    if (!parts.length) return "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>";
-    return parts.join("");
+        var inner = runs
+          .map(function (r) {
+            var rPr = ' lang="en-US"';
+            if (r.bold) rPr += ' b="1"';
+            if (r.italic) rPr += ' i="1"';
+            if (r.under) rPr += ' u="sng"';
+            rPr += ' dirty="0"';
+            // Preserve leading/trailing spaces in a run (ChatGPT bold mid-sentence)
+            var space =
+              /^\s|\s$/.test(r.text) ? ' xml:space="preserve"' : "";
+            return (
+              "<a:r><a:rPr" +
+              rPr +
+              "/><a:t" +
+              space +
+              ">" +
+              escapeXml(r.text) +
+              "</a:t></a:r>"
+            );
+          })
+          .join("");
+        // No empty <a:pPr/> — keeps notes looking like desktop, not Google Slides
+        return "<a:p>" + inner + "</a:p>";
+      })
+      .join("");
   }
 
   function findNotesTxBody(notesDoc) {
