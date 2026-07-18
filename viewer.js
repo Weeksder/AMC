@@ -331,7 +331,7 @@
   splitter.addEventListener("pointercancel", endDrag);
   window.addEventListener("resize", applyNotesHeight);
 
-  // Notes edit
+  // Notes edit — keep desktop PowerPoint style (plain paragraphs, not Google Docs paste)
   let saveTimer = null;
   notesBody.addEventListener("input", function () {
     clearTimeout(saveTimer);
@@ -343,6 +343,73 @@
       notesBody.innerHTML = "<p><br></p>";
     }
   });
+
+  // Paste from ChatGPT / Docs / Slides → simple one-line-per-<p> HTML (keep bold)
+  notesBody.addEventListener("paste", function (e) {
+    e.preventDefault();
+    var html = "";
+    var plain = "";
+    try {
+      html = (e.clipboardData && e.clipboardData.getData("text/html")) || "";
+      plain = (e.clipboardData && e.clipboardData.getData("text/plain")) || "";
+    } catch (err) {}
+    var normalized = "<p><br></p>";
+    if (
+      window.PptxNotesLoader &&
+      typeof PptxNotesLoader.normalizeNotesPasteHtml === "function"
+    ) {
+      normalized = PptxNotesLoader.normalizeNotesPasteHtml(html, plain);
+    } else if (plain) {
+      normalized = plain
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .map(function (line) {
+          if (!line.length) return "<p><br></p>";
+          return (
+            "<p>" +
+            String(line)
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;") +
+            "</p>"
+          );
+        })
+        .join("");
+    }
+    // Clear empty-notes placeholder before insert
+    var empty = notesBody.querySelector("p.empty-notes");
+    if (empty) {
+      notesBody.innerHTML = "";
+    }
+    // insertHTML keeps caret; if selection gone, replace whole body when empty
+    var ok = false;
+    try {
+      ok = document.execCommand("insertHTML", false, normalized);
+    } catch (err) {
+      ok = false;
+    }
+    if (!ok) {
+      notesBody.innerHTML = normalized;
+    }
+    saveCurrentNotes();
+  });
+
+  // Enter → new paragraph (not Chrome's default <div>, which looks Google-like)
+  notesBody.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    // Let list commands use default behavior
+    try {
+      if (document.queryCommandState("insertUnorderedList")) return;
+    } catch (err) {}
+    e.preventDefault();
+    try {
+      document.execCommand("insertParagraph");
+    } catch (err) {
+      document.execCommand("insertHTML", false, "<p><br></p>");
+    }
+    saveCurrentNotes();
+  });
+
   document.getElementById("fmtBar").addEventListener("click", function (e) {
     const btn = e.target.closest("button[data-cmd]");
     if (!btn) return;

@@ -79,9 +79,8 @@
               lineHtml +
               "</p>"
           );
-        } else if (allBold && sawText && t.length < 80 && !/[.!?]$/.test(t)) {
-          parts.push('<h3 class="notes-h"><strong>' + escapeHtmlText(t) + "</strong></h3>");
         } else {
+          // Desktop-style: always plain paragraphs (bold stays as <strong>, not headings)
           parts.push("<p>" + lineHtml + "</p>");
         }
         lineHtml = "";
@@ -118,6 +117,114 @@
       parts.pop();
     }
     return parts.join("\n");
+  }
+
+  /**
+   * Normalize pasted ChatGPT / Docs / Slides HTML into simple desktop-style
+   * notes: one visual line → one <p>, keep only bold/italic/underline.
+   */
+  function normalizeNotesPasteHtml(html, plainText) {
+    // Prefer structured HTML when present; fall back to plain text lines
+    if (html && /<[a-z][\s\S]*>/i.test(html)) {
+      try {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var body = doc.body;
+        // Strip Google/Office junk wrappers
+        body.querySelectorAll("style, meta, link, script, xml, o\\:p").forEach(function (el) {
+          el.remove();
+        });
+        var lines = [];
+        var cur = [];
+
+        function flush() {
+          lines.push(cur);
+          cur = [];
+        }
+        function pushText(t, bold, italic, under) {
+          if (!t) return;
+          var parts = String(t).split(/\r\n|\n|\r/);
+          for (var i = 0; i < parts.length; i++) {
+            if (i > 0) flush();
+            if (parts[i].length) {
+              cur.push({ t: parts[i], b: !!bold, i: !!italic, u: !!under });
+            }
+          }
+        }
+        function walk(n, bold, italic, under) {
+          if (n.nodeType === 3) {
+            pushText(n.nodeValue, bold, italic, under);
+            return;
+          }
+          if (n.nodeType !== 1) return;
+          var tag = n.tagName.toLowerCase();
+          if (tag === "br") {
+            flush();
+            return;
+          }
+          if (tag === "style" || tag === "script" || tag === "meta") return;
+          var isBlock =
+            tag === "p" ||
+            tag === "div" ||
+            tag === "li" ||
+            tag === "h1" ||
+            tag === "h2" ||
+            tag === "h3" ||
+            tag === "h4" ||
+            tag === "tr" ||
+            tag === "blockquote";
+          if (isBlock && cur.length) flush();
+          var b = bold || tag === "b" || tag === "strong";
+          var it = italic || tag === "i" || tag === "em";
+          var u = under || tag === "u";
+          // Inline style font-weight bold
+          try {
+            var fw = n.style && n.style.fontWeight;
+            if (fw === "bold" || parseInt(fw, 10) >= 600) b = true;
+          } catch (e) {}
+          Array.prototype.forEach.call(n.childNodes, function (ch) {
+            walk(ch, b, it, u);
+          });
+          if (isBlock) flush();
+        }
+        Array.prototype.forEach.call(body.childNodes, function (ch) {
+          walk(ch, false, false, false);
+        });
+        if (cur.length) flush();
+        while (lines.length && lines[lines.length - 1].length === 0) lines.pop();
+
+        if (lines.length) {
+          return lines
+            .map(function (runs) {
+              if (!runs.length) return "<p><br></p>";
+              var inner = runs
+                .map(function (r) {
+                  var esc = escapeHtmlText(r.t);
+                  if (r.b) esc = "<strong>" + esc + "</strong>";
+                  if (r.i) esc = "<em>" + esc + "</em>";
+                  if (r.u) esc = "<u>" + esc + "</u>";
+                  return esc;
+                })
+                .join("");
+              return "<p>" + inner + "</p>";
+            })
+            .join("");
+        }
+      } catch (e) {
+        /* fall through to plain */
+      }
+    }
+
+    var text = plainText != null ? String(plainText) : "";
+    if (!text.trim()) return "<p><br></p>";
+    return text
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map(function (line) {
+        if (!line.length) return "<p><br></p>";
+        return "<p>" + escapeHtmlText(line) + "</p>";
+      })
+      .join("");
   }
 
   function relsMap(relsXml) {
@@ -930,6 +1037,7 @@
     bufferFingerprint: bufferFingerprint,
     isAppleMobile: isAppleMobile,
     buildPptxBlobWithNotes: buildPptxBlobWithNotes,
+    normalizeNotesPasteHtml: normalizeNotesPasteHtml,
     downloadBlob: downloadBlob,
   };
 })(typeof window !== "undefined" ? window : globalThis);
