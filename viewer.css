@@ -286,10 +286,10 @@ html, body {
 .notes-body:focus {
   box-shadow: inset 0 0 0 2px rgba(227,108,10,.25);
 }
-/* One line per paragraph — no Google-style nested divs spacing */
+/* One line per paragraph — tight desktop-style spacing */
 .notes-body p,
 .notes-body div {
-  margin: 0 0 var(--notes-para-gap);
+  margin: 0;
   padding: 0;
   font-size: inherit;
   font-family: inherit;
@@ -298,10 +298,18 @@ html, body {
   background: transparent;
   border: none;
 }
+.notes-body p + p {
+  margin-top: var(--notes-para-gap);
+}
 .notes-body p.notes-blank {
-  margin: 0 0 var(--notes-blank-gap);
-  min-height: 0.9em;
-  line-height: inherit;
+  margin: 0;
+  min-height: 0.55em;
+  max-height: 0.75em;
+  line-height: 0.75;
+  overflow: hidden;
+}
+.notes-body p.notes-blank + p.notes-blank {
+  display: none; /* collapse stacked blanks in the viewer */
 }
 .notes-body p.notes-bullet { position: relative; padding-left: 0; }
 .notes-body p.notes-bullet::before {

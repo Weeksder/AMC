@@ -456,11 +456,11 @@
 
   // Spacing
   const SPACING = [
-    { line: 1.15, para: "0px", blank: "0px" },
-    { line: 1.25, para: "2px", blank: "0px" },
-    { line: 1.4, para: "6px", blank: "2px" },
-    { line: 1.55, para: "10px", blank: "4px" },
-    { line: 1.7, para: "14px", blank: "8px" },
+    { line: 1.12, para: "0px", blank: "0px" },
+    { line: 1.2, para: "2px", blank: "0px" },
+    { line: 1.3, para: "4px", blank: "2px" },
+    { line: 1.45, para: "8px", blank: "4px" },
+    { line: 1.6, para: "12px", blank: "6px" },
   ];
   function applySpacing(level) {
     const i = Math.max(0, Math.min(SPACING.length - 1, level | 0));

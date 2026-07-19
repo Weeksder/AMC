@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-19c";
+  var TOOL_VERSION = "2026-07-19d";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -1206,10 +1206,97 @@
     }
 
     /**
-     * Keep original notes XML (preserves bold/italic) but:
-     * - do NOT copy notesMaster (that mix with blank shell causes Repair)
-     * - notes rels only point at the parent slide
+     * Keep original notes XML (preserves bold) + our own minimal notesMaster
+     * (tight line spacing, theme1 — avoids Repair and extra blank gaps).
      */
+    function tightenNotesXml(notesXml) {
+      // Remove paragraph spacing attrs / elements that create huge gaps
+      notesXml = notesXml.replace(/\s(spcBef|spcAft|spcLin)="[^"]*"/gi, "");
+      notesXml = notesXml.replace(/<a:spcBef\b[^/]*\/>/gi, "");
+      notesXml = notesXml.replace(
+        /<a:spcBef\b[^>]*>[\s\S]*?<\/a:spcBef>/gi,
+        ""
+      );
+      notesXml = notesXml.replace(/<a:spcAft\b[^/]*\/>/gi, "");
+      notesXml = notesXml.replace(
+        /<a:spcAft\b[^>]*>[\s\S]*?<\/a:spcAft>/gi,
+        ""
+      );
+      notesXml = notesXml.replace(/<a:lnSpc\b[^/]*\/>/gi, "");
+      notesXml = notesXml.replace(
+        /<a:lnSpc\b[^>]*>[\s\S]*?<\/a:lnSpc>/gi,
+        ""
+      );
+      // Tight list style so Notes Page uses 12pt + small gaps (keeps b="1" on runs)
+      var tightLst =
+        "<a:lstStyle>" +
+        '<a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1">' +
+        '<a:spcBef><a:spcPts val="0"/></a:spcBef>' +
+        '<a:spcAft><a:spcPts val="40"/></a:spcAft>' +
+        '<a:lnSpc><a:spcPct val="100000"/></a:lnSpc>' +
+        '<a:defRPr sz="1200" kern="1200">' +
+        "<a:solidFill><a:schemeClr val=\"tx1\"/></a:solidFill>" +
+        '<a:latin typeface="Calibri"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/>' +
+        "</a:defRPr></a:lvl1pPr></a:lstStyle>";
+      if (/<a:lstStyle\s*\/>/.test(notesXml)) {
+        notesXml = notesXml.replace(/<a:lstStyle\s*\/>/, tightLst);
+      } else if (/<a:lstStyle>[\s\S]*?<\/a:lstStyle>/.test(notesXml)) {
+        notesXml = notesXml.replace(
+          /<a:lstStyle>[\s\S]*?<\/a:lstStyle>/,
+          tightLst
+        );
+      }
+      // Collapse 2+ consecutive empty paragraphs into one
+      var emptyP =
+        "<a:p><a:endParaRPr[^/]*/></a:p>|<a:p><a:br[\\s\\S]*?</a:p>";
+      notesXml = notesXml.replace(
+        /(?:<a:p>(?:<a:pPr\s*\/>)?(?:<a:br\b[^/]*\/>|<a:br\b[^>]*>[\s\S]*?<\/a:br>)?(?:<a:endParaRPr[^/]*\/>)?<\/a:p>\s*){2,}/gi,
+        '<a:p><a:endParaRPr lang="en-US" dirty="0"/></a:p>'
+      );
+      return notesXml;
+    }
+
+    // Minimal notesMaster (compatible with blank shell + theme1)
+    var MINIMAL_NOTES_MASTER =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<p:notesMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+      'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
+      "<p:cSld><p:bg><p:bgRef idx=\"1001\"><a:schemeClr val=\"bg1\"/></p:bgRef></p:bg><p:spTree>" +
+      '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+      '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>' +
+      '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
+      '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/>' +
+      '<p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr>' +
+      '<p:nvPr><p:ph type="sldImg" idx="0"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>' +
+      '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/>' +
+      '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>' +
+      '<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>' +
+      "<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"en-US\"/></a:p></p:txBody></p:sp>" +
+      "</p:spTree></p:cSld>" +
+      '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" ' +
+      'accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>' +
+      "<p:notesStyle>" +
+      '<a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1">' +
+      '<a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="40"/></a:spcAft>' +
+      '<a:lnSpc><a:spcPct val="100000"/></a:lnSpc>' +
+      '<a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill>' +
+      '<a:latin typeface="Calibri"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr>' +
+      "</a:lvl1pPr></p:notesStyle></p:notesMaster>";
+
+    var notesMasterAdded = false;
+    if (!tgtZip.file("ppt/notesMasters/notesMaster1.xml")) {
+      tgtZip.file("ppt/notesMasters/notesMaster1.xml", MINIMAL_NOTES_MASTER);
+      tgtZip.file(
+        "ppt/notesMasters/_rels/notesMaster1.xml.rels",
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>' +
+          "</Relationships>"
+      );
+      notesMasterAdded = true;
+    }
+
     var addedMeta = [];
     var nextSlideNum = tgtCount + 1;
     var notesCounter = 1;
@@ -1232,7 +1319,6 @@
       var xml = await srcZip.file(sp).async("string");
       xml = cleanSlideXmlLikeDesktop(xml);
       xml = remapMedia(xml);
-      // Strip Office extension lists that can confuse blank-shell packages
       xml = xml.replace(/<p:extLst>[\s\S]*?<\/p:extLst>/g, "");
       if (xml.indexOf("<?xml") !== 0) {
         xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
@@ -1243,7 +1329,7 @@
         var rels = await srcZip.file(rp).async("string");
         rels = remapMedia(rels);
 
-        // Preserve speaker notes / footnotes with original formatting (bold, etc.)
+        // Preserve speaker notes / footnotes with original bold formatting
         var notesMatch = rels.match(
           /Target="([^"]*notesSlides\/notesSlide\d+\.xml)"/i
         );
@@ -1261,6 +1347,7 @@
               /<p:extLst>[\s\S]*?<\/p:extLst>/g,
               ""
             );
+            srcNotesXml = tightenNotesXml(srcNotesXml);
             if (srcNotesXml.indexOf("<?xml") !== 0) {
               srcNotesXml =
                 '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
@@ -1269,18 +1356,18 @@
             tgtZip.file(newNotesPath, srcNotesXml);
             notesPartsAdded.push(newNotesPath);
 
-            // Notes → slide only (no notesMaster → avoids Repair, keeps bold text)
+            // Notes → slide + our minimal notesMaster
             tgtZip.file(
               "ppt/notesSlides/_rels/" + newNotesName + ".rels",
               '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="../notesMasters/notesMaster1.xml"/>' +
+                '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide' +
                 newNum +
                 '.xml"/>' +
                 "</Relationships>"
             );
 
-            rels = rels.replace(/<Relationship\b[^>]*notesMaster[^>]*\/>/gi, "");
             if (/notesSlide/i.test(rels)) {
               rels = rels.replace(
                 /Target="[^"]*notesSlides\/notesSlide\d+\.xml"/gi,
@@ -1300,7 +1387,7 @@
           }
         }
 
-        // Never keep notesMaster on slide rels in blank target
+        // Drop source notesMaster refs on slides (we use our own)
         rels = rels.replace(/<Relationship\b[^>]*notesMaster[^>]*\/>/gi, "");
 
         if (rels.indexOf("<?xml") !== 0) {
@@ -1325,11 +1412,10 @@
       );
     }
 
-    // presentation.xml.rels — slide relationships only (no notesMaster)
+    // presentation.xml.rels — notesMaster (once) + slides
     var prsRelsXml = await tgtZip
       .file("ppt/_rels/presentation.xml.rels")
       .async("string");
-    // Remove any accidental notesMaster from target
     prsRelsXml = prsRelsXml.replace(
       /<Relationship\b[^>]*notesMaster[^>]*\/>/gi,
       ""
@@ -1339,6 +1425,18 @@
       maxRid = Math.max(maxRid, parseInt(n, 10));
       return _;
     });
+
+    var notesMasterRid = null;
+    if (notesMasterAdded || tgtZip.file("ppt/notesMasters/notesMaster1.xml")) {
+      notesMasterRid = "rId" + (++maxRid);
+      prsRelsXml = prsRelsXml.replace(
+        "</Relationships>",
+        '<Relationship Id="' +
+          notesMasterRid +
+          '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="notesMasters/notesMaster1.xml"/>' +
+          "</Relationships>"
+      );
+    }
 
     var relChunks = [];
     addedMeta.forEach(function (meta, idx) {
@@ -1360,13 +1458,25 @@
     );
     tgtZip.file("ppt/_rels/presentation.xml.rels", prsRelsXml);
 
-    // presentation.xml sldIdLst (never inject notesMasterIdLst into blank shell)
+    // presentation.xml — notesMasterIdLst (tight master) + sldIdLst
     var prsXml = await tgtZip.file("ppt/presentation.xml").async("string");
     prsXml = prsXml.replace(
       /<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>/g,
       ""
     );
     prsXml = prsXml.replace(/<p:notesMasterIdLst\s*\/>/g, "");
+    if (notesMasterRid) {
+      var nmList =
+        '<p:notesMasterIdLst><p:notesMasterId r:id="' +
+        notesMasterRid +
+        '"/></p:notesMasterIdLst>';
+      if (/<\/p:sldMasterIdLst>/.test(prsXml)) {
+        prsXml = prsXml.replace(
+          /<\/p:sldMasterIdLst>/,
+          "</p:sldMasterIdLst>" + nmList
+        );
+      }
+    }
 
     var maxId = 255;
     prsXml.replace(/<p:sldId\b[^>]*\bid="(\d+)"/g, function (_, n) {
@@ -1438,6 +1548,14 @@
         );
       }
     });
+    if (
+      notesMasterAdded &&
+      ctXml.indexOf('PartName="/ppt/notesMasters/notesMaster1.xml"') < 0
+    ) {
+      ctAdds.push(
+        '<Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>'
+      );
+    }
     if (ctAdds.length) {
       ctXml = ctXml.replace("</Types>", ctAdds.join("") + "</Types>");
     }

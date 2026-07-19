@@ -113,10 +113,22 @@
       if (hasContent || plain || lineHtml) flushLine();
       else parts.push('<p class="notes-blank"><br></p>');
     });
-    while (parts.length && parts[parts.length - 1] === '<p class="notes-blank"><br></p>') {
-      parts.pop();
+    // Collapse consecutive blank lines → max one (removes extra vertical gaps)
+    var collapsed = [];
+    parts.forEach(function (p) {
+      var isBlank = p.indexOf("notes-blank") >= 0;
+      if (isBlank && collapsed.length && collapsed[collapsed.length - 1].indexOf("notes-blank") >= 0) {
+        return;
+      }
+      collapsed.push(p);
+    });
+    while (
+      collapsed.length &&
+      collapsed[collapsed.length - 1].indexOf("notes-blank") >= 0
+    ) {
+      collapsed.pop();
     }
-    return parts.join("\n");
+    return collapsed.join("\n");
   }
 
   /**
