@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-19a";
+  var TOOL_VERSION = "2026-07-19c";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -1205,45 +1205,11 @@
       return ctXml;
     }
 
-    // Copy notesMaster from source if target is a blank shell (needed for footnotes)
-    var needNotesMaster = false;
-    var notesMasterCopied = false;
-    try {
-      if (
-        srcZip.file("ppt/notesMasters/notesMaster1.xml") &&
-        !tgtZip.file("ppt/notesMasters/notesMaster1.xml")
-      ) {
-        tgtZip.file(
-          "ppt/notesMasters/notesMaster1.xml",
-          await srcZip.file("ppt/notesMasters/notesMaster1.xml").async("uint8array")
-        );
-        // Point notesMaster at blank's theme1 (source may use theme2)
-        var nmRels =
-          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>' +
-          "</Relationships>";
-        if (srcZip.file("ppt/notesMasters/_rels/notesMaster1.xml.rels")) {
-          var rawNmRels = await srcZip
-            .file("ppt/notesMasters/_rels/notesMaster1.xml.rels")
-            .async("string");
-          // Force theme to theme1 if present on target
-          rawNmRels = rawNmRels.replace(
-            /Target="[^"]*theme[^"]*"/gi,
-            'Target="../theme/theme1.xml"'
-          );
-          nmRels = rawNmRels;
-        }
-        tgtZip.file("ppt/notesMasters/_rels/notesMaster1.xml.rels", nmRels);
-        notesMasterCopied = true;
-        needNotesMaster = true;
-      } else if (tgtZip.file("ppt/notesMasters/notesMaster1.xml")) {
-        needNotesMaster = true;
-      }
-    } catch (e) {
-      console.warn("notesMaster copy failed", e);
-    }
-
+    /**
+     * Keep original notes XML (preserves bold/italic) but:
+     * - do NOT copy notesMaster (that mix with blank shell causes Repair)
+     * - notes rels only point at the parent slide
+     */
     var addedMeta = [];
     var nextSlideNum = tgtCount + 1;
     var notesCounter = 1;
@@ -1266,6 +1232,8 @@
       var xml = await srcZip.file(sp).async("string");
       xml = cleanSlideXmlLikeDesktop(xml);
       xml = remapMedia(xml);
+      // Strip Office extension lists that can confuse blank-shell packages
+      xml = xml.replace(/<p:extLst>[\s\S]*?<\/p:extLst>/g, "");
       if (xml.indexOf("<?xml") !== 0) {
         xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
       }
@@ -1275,7 +1243,7 @@
         var rels = await srcZip.file(rp).async("string");
         rels = remapMedia(rels);
 
-        // Preserve speaker notes / footnotes (copy notes slide part)
+        // Preserve speaker notes / footnotes with original formatting (bold, etc.)
         var notesMatch = rels.match(
           /Target="([^"]*notesSlides\/notesSlide\d+\.xml)"/i
         );
@@ -1287,70 +1255,53 @@
           if (srcZip.file(notesTarget)) {
             var newNotesName = "notesSlide" + notesCounter + ".xml";
             var newNotesPath = "ppt/notesSlides/" + newNotesName;
-            var notesXml = await srcZip.file(notesTarget).async("string");
-            notesXml = remapMedia(notesXml);
-            if (notesXml.indexOf("<?xml") !== 0) {
-              notesXml =
+            var srcNotesXml = await srcZip.file(notesTarget).async("string");
+            srcNotesXml = remapMedia(srcNotesXml);
+            srcNotesXml = srcNotesXml.replace(
+              /<p:extLst>[\s\S]*?<\/p:extLst>/g,
+              ""
+            );
+            if (srcNotesXml.indexOf("<?xml") !== 0) {
+              srcNotesXml =
                 '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-                notesXml;
+                srcNotesXml;
             }
-            tgtZip.file(newNotesPath, notesXml);
+            tgtZip.file(newNotesPath, srcNotesXml);
             notesPartsAdded.push(newNotesPath);
 
-            var oldNotesRels =
-              "ppt/notesSlides/_rels/" + notesTarget.split("/").pop() + ".rels";
-            var newNotesRels = "ppt/notesSlides/_rels/" + newNotesName + ".rels";
-            if (srcZip.file(oldNotesRels)) {
-              var nr = await srcZip.file(oldNotesRels).async("string");
-              nr = remapMedia(nr);
-              // Point back to the new slide number
-              nr = nr.replace(
-                /Target="[^"]*slide\d+\.xml"/gi,
-                'Target="../slides/slide' + newNum + '.xml"'
-              );
-              // Keep notesMaster if present; ensure path is valid
-              if (
-                /notesMaster/i.test(nr) &&
-                !tgtZip.file("ppt/notesMasters/notesMaster1.xml")
-              ) {
-                // Drop notesMaster link if we couldn't copy it
-                nr = nr.replace(
-                  /<Relationship\b[^>]*notesMaster[^>]*\/>/gi,
-                  ""
-                );
-              } else if (/notesMaster/i.test(nr)) {
-                nr = nr.replace(
-                  /Target="[^"]*notesMaster[^"]*"/gi,
-                  'Target="../notesMasters/notesMaster1.xml"'
-                );
-              }
-              tgtZip.file(newNotesRels, nr);
-            } else {
-              // Minimal notes rels
-              var minimalNr =
-                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            // Notes → slide only (no notesMaster → avoids Repair, keeps bold text)
+            tgtZip.file(
+              "ppt/notesSlides/_rels/" + newNotesName + ".rels",
+              '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
                 '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide' +
                 newNum +
-                '.xml"/>';
-              if (needNotesMaster) {
-                minimalNr +=
-                  '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="../notesMasters/notesMaster1.xml"/>';
-              }
-              minimalNr += "</Relationships>";
-              tgtZip.file(newNotesRels, minimalNr);
-            }
-
-            rels = rels.replace(
-              /Target="[^"]*notesSlides\/notesSlide\d+\.xml"/gi,
-              'Target="../notesSlides/' + newNotesName + '"'
+                '.xml"/>' +
+                "</Relationships>"
             );
+
+            rels = rels.replace(/<Relationship\b[^>]*notesMaster[^>]*\/>/gi, "");
+            if (/notesSlide/i.test(rels)) {
+              rels = rels.replace(
+                /Target="[^"]*notesSlides\/notesSlide\d+\.xml"/gi,
+                'Target="../notesSlides/' + newNotesName + '"'
+              );
+            } else {
+              rels = rels.replace(
+                "</Relationships>",
+                '<Relationship Id="rIdNotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/' +
+                  newNotesName +
+                  '"/></Relationships>'
+              );
+            }
             notesCounter++;
           } else {
-            // Notes part missing — drop dangling notes relationship
             rels = rels.replace(/<Relationship\b[^>]*notesSlide[^>]*\/>/gi, "");
           }
         }
+
+        // Never keep notesMaster on slide rels in blank target
+        rels = rels.replace(/<Relationship\b[^>]*notesMaster[^>]*\/>/gi, "");
 
         if (rels.indexOf("<?xml") !== 0) {
           rels =
@@ -1374,34 +1325,20 @@
       );
     }
 
-    // presentation.xml.rels — notesMaster (if needed) + slide relationships
+    // presentation.xml.rels — slide relationships only (no notesMaster)
     var prsRelsXml = await tgtZip
       .file("ppt/_rels/presentation.xml.rels")
       .async("string");
+    // Remove any accidental notesMaster from target
+    prsRelsXml = prsRelsXml.replace(
+      /<Relationship\b[^>]*notesMaster[^>]*\/>/gi,
+      ""
+    );
     var maxRid = 0;
     prsRelsXml.replace(/Id="rId(\d+)"/g, function (_, n) {
       maxRid = Math.max(maxRid, parseInt(n, 10));
       return _;
     });
-
-    var notesMasterRid = null;
-    if (needNotesMaster && notesMasterCopied) {
-      if (!/relationships\/notesMaster/i.test(prsRelsXml)) {
-        notesMasterRid = "rId" + (++maxRid);
-        prsRelsXml = prsRelsXml.replace(
-          "</Relationships>",
-          '<Relationship Id="' +
-            notesMasterRid +
-            '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="notesMasters/notesMaster1.xml"/>' +
-            "</Relationships>"
-        );
-      } else {
-        var nmM = prsRelsXml.match(
-          /Id="(rId\d+)"[^>]*notesMaster|notesMaster[^>]*Id="(rId\d+)"/i
-        );
-        if (nmM) notesMasterRid = nmM[1] || nmM[2];
-      }
-    }
 
     var relChunks = [];
     addedMeta.forEach(function (meta, idx) {
@@ -1423,23 +1360,13 @@
     );
     tgtZip.file("ppt/_rels/presentation.xml.rels", prsRelsXml);
 
-    // presentation.xml sldIdLst (+ notesMasterIdLst if we added notesMaster)
+    // presentation.xml sldIdLst (never inject notesMasterIdLst into blank shell)
     var prsXml = await tgtZip.file("ppt/presentation.xml").async("string");
-    if (
-      notesMasterRid &&
-      !/<p:notesMasterIdLst[\s/>]/.test(prsXml)
-    ) {
-      var nmList =
-        '<p:notesMasterIdLst><p:notesMasterId r:id="' +
-        notesMasterRid +
-        '"/></p:notesMasterIdLst>';
-      if (/<\/p:sldMasterIdLst>/.test(prsXml)) {
-        prsXml = prsXml.replace(
-          /<\/p:sldMasterIdLst>/,
-          "</p:sldMasterIdLst>" + nmList
-        );
-      }
-    }
+    prsXml = prsXml.replace(
+      /<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>/g,
+      ""
+    );
+    prsXml = prsXml.replace(/<p:notesMasterIdLst\s*\/>/g, "");
 
     var maxId = 255;
     prsXml.replace(/<p:sldId\b[^>]*\bid="(\d+)"/g, function (_, n) {
@@ -1478,11 +1405,6 @@
         /<\/p:sldMasterIdLst>/,
         "</p:sldMasterIdLst>" + newList
       );
-    } else if (/<\/p:notesMasterIdLst>/.test(prsXml)) {
-      prsXml = prsXml.replace(
-        /<\/p:notesMasterIdLst>/,
-        "</p:notesMasterIdLst>" + newList
-      );
     } else {
       throw new Error("Could not insert sldIdLst into presentation.xml");
     }
@@ -1516,14 +1438,6 @@
         );
       }
     });
-    if (
-      notesMasterCopied &&
-      ctXml.indexOf('PartName="/ppt/notesMasters/notesMaster1.xml"') < 0
-    ) {
-      ctAdds.push(
-        '<Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>'
-      );
-    }
     if (ctAdds.length) {
       ctXml = ctXml.replace("</Types>", ctAdds.join("") + "</Types>");
     }
