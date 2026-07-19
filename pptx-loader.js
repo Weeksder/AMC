@@ -381,19 +381,26 @@
       }
 
       var notesHtml = "";
+      var originalNotesXml = null;
       var notesRid = Object.keys(rels).find(function (id) {
         return (rels[id] || "").toLowerCase().indexOf("notesslide") >= 0;
       });
       if (notesRid) {
         var notesPath = joinPptPath(baseDir, rels[notesRid]);
         var notesFile = zip.file(notesPath);
-        if (notesFile) notesHtml = notesXmlToHtml(await notesFile.async("text"));
+        if (notesFile) {
+          originalNotesXml = await notesFile.async("text");
+          notesHtml = notesXmlToHtml(originalNotesXml);
+        }
       }
 
       slides.push({
         n: i + 1,
         img: imgDataUrl,
         notesHtml: notesHtml,
+        // Keep exact OOXML so SAVE can write the file back unchanged if not edited
+        originalNotesXml: originalNotesXml,
+        notesDirty: false,
         hasNotes: !!(notesHtml && notesHtml.replace(/<[^>]+>/g, "").trim()),
       });
     }
@@ -881,10 +888,9 @@
   }
 
   /**
-   * Write current slide notes into a copy of the original PPTX and return a Blob.
-   * Creates notes parts when missing (common after Extract → blank target / PDF).
-   * @param {ArrayBuffer} pptxBuffer
-   * @param {Array<{n:number,notesHtml:string}>} slides
+   * Write notes into a copy of the original PPTX.
+   * Unedited slides: leave notes parts alone (file defaults / spacing / bold).
+   * Only rebuild notes for slides the user actually edited (notesDirty).
    */
   async function buildPptxBlobWithNotes(pptxBuffer, slides) {
     if (typeof JSZip === "undefined") throw new Error("JSZip failed to load");
@@ -930,9 +936,15 @@
           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
       var rels = relsMap(relsXml);
 
-      var notesHtml = "";
-      if (slides[i]) notesHtml = normalizeNotesHtmlForSave(slides[i].notesHtml || "");
-      var paragraphsXml = notesHtmlToOoxmlParagraphs(notesHtml);
+      var slideState = slides[i] || {};
+      var dirty = !!slideState.notesDirty;
+
+      // —— Unedited: leave this slide's notes exactly as in the uploaded file ——
+      if (!dirty) {
+        continue;
+      }
+
+      var notesHtml = normalizeNotesHtmlForSave(slideState.notesHtml || "");
 
       // Existing notes part?
       var notesRid = Object.keys(rels).find(function (id) {
@@ -944,8 +956,12 @@
       if (notesRid) {
         notesPath = joinPptPath(baseDir, rels[notesRid]);
         notesFileName = notesPath.split("/").pop();
-      } else {
-        // Create new notes slide (extracted/blank decks often have none)
+      }
+
+      // —— Edited (or new) notes only ——
+      var paragraphsXml = notesHtmlToOoxmlParagraphs(notesHtml);
+
+      if (!notesRid) {
         notesFileName = "notesSlide" + nextNotes + ".xml";
         nextNotes++;
         notesPath = "ppt/notesSlides/" + notesFileName;
@@ -956,20 +972,18 @@
           relsXml = ensureNotesRelOnSlideRels(relsXml, notesFileName);
         }
         zip.file(relsPath, relsXml);
+        // New notes part: only link to parent slide
+        zip.file(
+          "ppt/notesSlides/_rels/" + notesFileName + ".rels",
+          buildNotesSlideRels(slideBase)
+        );
+      } else {
+        // Keep existing notes .rels (notesMaster etc.) — only replace notes XML body file
+        notesPath = joinPptPath(baseDir, rels[notesRid]);
+        notesFileName = notesPath.split("/").pop();
       }
 
-      // Always rewrite notes XML from scratch so content is reliable
       zip.file(notesPath, buildNotesSlideXml(paragraphsXml));
-      zip.file(
-        "ppt/notesSlides/_rels/" + notesFileName + ".rels",
-        buildNotesSlideRels(slideBase)
-      );
-
-      // If notes existed, still ensure slide rels target is correct
-      if (notesRid) {
-        relsXml = ensureNotesRelOnSlideRels(relsXml, notesFileName);
-        zip.file(relsPath, relsXml);
-      }
     }
 
     // Content_Types: notes slide overrides

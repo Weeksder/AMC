@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#e8e8e8">
   <meta name="format-detection" content="telephone=no">
   <title>Notes Viewer</title>
-  <link rel="stylesheet" href="viewer.css?v=20260719d">
+  <link rel="stylesheet" href="viewer.css?v=20260719h">
 </head>
 <body>
   <div class="empty-state" id="emptyState">
@@ -46,6 +46,10 @@
               <button type="button" id="btnSpaceDown" aria-label="Tighter spacing">▲</button>
               <button type="button" id="btnSpaceUp" aria-label="Looser spacing">▼</button>
             </div>
+            <div class="font-size-ctl tools-extra" title="Notes text size (viewer only — not saved to the file)">
+              <button type="button" id="btnFontDown" aria-label="Smaller notes text">A−</button>
+              <button type="button" id="btnFontUp" aria-label="Larger notes text">A+</button>
+            </div>
           </div>
           <div class="fmt tools-extra" id="fmtBar">
             <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
@@ -76,8 +80,8 @@
     </section>
   </div>
 
-  <script src="jszip.min.js?v=20260719d"></script>
-  <script src="pptx-loader.js?v=20260719d"></script>
-  <script src="viewer.js?v=20260719d"></script>
+  <script src="jszip.min.js?v=20260719h"></script>
+  <script src="pptx-loader.js?v=20260719h"></script>
+  <script src="viewer.js?v=20260719h"></script>
 </body>
 </html>

@@ -11,6 +11,7 @@
   let wheelLock = false;
   let sidebarW = 176;
   let spacingLevel = 0;
+  let fontSizeLevel = 2; // index into FONT_SIZES (14px default)
 
   const appEl = document.getElementById("app");
   const emptyState = document.getElementById("emptyState");
@@ -32,6 +33,8 @@
   const deckTitle = document.getElementById("deckTitle");
   const btnSpaceDown = document.getElementById("btnSpaceDown");
   const btnSpaceUp = document.getElementById("btnSpaceUp");
+  const btnFontDown = document.getElementById("btnFontDown");
+  const btnFontUp = document.getElementById("btnFontUp");
   const btnTogglePicture = document.getElementById("btnTogglePicture");
   const btnToggleTools = document.getElementById("btnToggleTools");
   const btnHome = document.getElementById("btnHome");
@@ -60,6 +63,11 @@
   function saveCurrentNotes() {
     if (!SLIDES.length || index < 0 || index >= SLIDES.length) return;
     try {
+      // Only write editor HTML when the user actually edited this slide.
+      // Browsers re-serialize contenteditable HTML on focus/navigation — that
+      // must NOT mark notes dirty or SAVE would rebuild and change spacing.
+      if (!SLIDES[index].notesDirty) return;
+
       let html = notesBody.innerHTML;
       // Don't persist the placeholder as real notes
       if (notesBody.querySelector && notesBody.querySelector("p.empty-notes")) {
@@ -74,6 +82,12 @@
     } catch (e) {
       console.warn(e);
     }
+  }
+
+  function anyNotesDirty() {
+    return SLIDES.some(function (s) {
+      return !!s.notesDirty;
+    });
   }
 
   function emptyNotesHtml() {
@@ -114,6 +128,7 @@
       s._originalHtml = s.notesHtml || "";
       // Only rehydrate browser drafts when not a brand-new open.
       // Previously, same filename reused old footnotes on a new PDF extract.
+      if (s.notesDirty == null) s.notesDirty = false;
       if (!SKIP_LOCAL_NOTES) {
         const saved = loadSavedNotes(i);
         if (saved !== null) {
@@ -123,6 +138,7 @@
           if (!fromFile && fromSaved) {
             s.notesHtml = saved;
             s.hasNotes = true;
+            s.notesDirty = true; // draft is not original OOXML
           }
         }
       }
@@ -331,9 +347,10 @@
   splitter.addEventListener("pointercancel", endDrag);
   window.addEventListener("resize", applyNotesHeight);
 
-  // Notes edit — keep desktop PowerPoint style (plain paragraphs, not Google Docs paste)
+  // Notes edit
   let saveTimer = null;
   notesBody.addEventListener("input", function () {
+    if (SLIDES[index]) SLIDES[index].notesDirty = true;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveCurrentNotes, 250);
   });
@@ -347,6 +364,7 @@
   // Paste from ChatGPT / Docs / Slides → simple one-line-per-<p> HTML (keep bold)
   notesBody.addEventListener("paste", function (e) {
     e.preventDefault();
+    if (SLIDES[index]) SLIDES[index].notesDirty = true;
     var html = "";
     var plain = "";
     try {
@@ -376,12 +394,10 @@
         })
         .join("");
     }
-    // Clear empty-notes placeholder before insert
     var empty = notesBody.querySelector("p.empty-notes");
     if (empty) {
       notesBody.innerHTML = "";
     }
-    // insertHTML keeps caret; if selection gone, replace whole body when empty
     var ok = false;
     try {
       ok = document.execCommand("insertHTML", false, normalized);
@@ -402,6 +418,7 @@
       if (document.queryCommandState("insertUnorderedList")) return;
     } catch (err) {}
     e.preventDefault();
+    if (SLIDES[index]) SLIDES[index].notesDirty = true;
     try {
       document.execCommand("insertParagraph");
     } catch (err) {
@@ -415,6 +432,7 @@
     if (!btn) return;
     e.preventDefault();
     notesBody.focus();
+    if (SLIDES[index]) SLIDES[index].notesDirty = true;
     document.execCommand(btn.dataset.cmd, false, null);
     saveCurrentNotes();
   });
@@ -425,6 +443,7 @@
     btnSplitLine.addEventListener("click", function (e) {
       e.preventDefault();
       notesBody.focus();
+      if (SLIDES[index]) SLIDES[index].notesDirty = true;
       // Clear empty placeholder first
       var empty = notesBody.querySelector("p.empty-notes");
       if (empty) notesBody.innerHTML = "";
@@ -449,12 +468,13 @@
       localStorage.removeItem(storageKey(index));
     } catch (e) {}
     SLIDES[index].notesHtml = SLIDES[index]._originalHtml || "";
+    SLIDES[index].notesDirty = false; // back to original OOXML on SAVE
     SLIDES[index].hasNotes = (SLIDES[index].notesHtml || "").replace(/<[^>]+>/g, "").trim().length > 0;
     show(index, { skipSave: true });
   });
   window.addEventListener("beforeunload", saveCurrentNotes);
 
-  // Spacing
+  // Spacing (viewer display only)
   const SPACING = [
     { line: 1.12, para: "0px", blank: "0px" },
     { line: 1.2, para: "2px", blank: "0px" },
@@ -481,6 +501,31 @@
   btnSpaceUp.addEventListener("click", function () {
     applySpacing(spacingLevel + 1);
   });
+
+  // Notes text size — viewer only (never written into the PPTX on SAVE)
+  const FONT_SIZES = [11, 12, 14, 16, 18, 20, 24];
+  const FONT_SIZE_PREF_KEY = "pptxNotesViewer:notesFontSize";
+  function applyFontSize(level) {
+    const i = Math.max(0, Math.min(FONT_SIZES.length - 1, level | 0));
+    fontSizeLevel = i;
+    var px = FONT_SIZES[i] + "px";
+    document.documentElement.style.setProperty("--notes-font-size", px);
+    if (btnFontDown) btnFontDown.disabled = i <= 0;
+    if (btnFontUp) btnFontUp.disabled = i >= FONT_SIZES.length - 1;
+    try {
+      localStorage.setItem(FONT_SIZE_PREF_KEY, String(i));
+    } catch (e) {}
+  }
+  if (btnFontDown) {
+    btnFontDown.addEventListener("click", function () {
+      applyFontSize(fontSizeLevel - 1);
+    });
+  }
+  if (btnFontUp) {
+    btnFontUp.addEventListener("click", function () {
+      applyFontSize(fontSizeLevel + 1);
+    });
+  }
 
   function setHidePicture(hidden) {
     appEl.classList.toggle("hide-picture", !!hidden);
@@ -513,6 +558,7 @@
         "Notes Viewer help\n\n" +
           "• Browse slides in the left thumbnails or use ◀ ▶ / arrow keys.\n" +
           "• Type speaker notes in the bottom pane. Use B / I / U and lists to format.\n" +
+          "• A− / A+ change notes text size in the viewer only (not saved to the file).\n" +
           "• Hide picture / Hide tools toggle the layout.\n" +
           "• SAVE downloads a .pptx with your notes written into the file.\n" +
           "• Open that file in PowerPoint and use View → Notes to see them.\n" +
@@ -535,13 +581,21 @@
       btnSaveJson.disabled = true;
       btnSaveJson.textContent = "…";
       try {
-        // Flush every slide's notes from the editor into SLIDES[]
+        // Flush editor only for slides the user actually edited
         saveCurrentNotes();
-        var blob = await PptxNotesLoader.buildPptxBlobWithNotes(ORIGINAL_PPTX_BUFFER, SLIDES);
         var base = (ORIGINAL_FILE_NAME || DECK_KEY + ".pptx")
           .replace(/\.pptx$/i, "")
           .replace(/_notes$/i, "");
         var outName = base + "_notes.pptx";
+        var blob;
+        // No edits → download the original file as-is (spaces, bold, everything)
+        if (!anyNotesDirty()) {
+          blob = new Blob([ORIGINAL_PPTX_BUFFER], {
+            type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          });
+        } else {
+          blob = await PptxNotesLoader.buildPptxBlobWithNotes(ORIGINAL_PPTX_BUFFER, SLIDES);
+        }
         var result = await PptxNotesLoader.downloadBlob(blob, outName);
         if (result && result.cancelled) {
           btnSaveJson.textContent = "SAVE";
@@ -554,7 +608,9 @@
           ORIGINAL_FILE_NAME = outName;
         } catch (e) {}
         if (saveStatus) {
-          saveStatus.textContent = "saved " + outName + " — open this file in PowerPoint (View → Notes)";
+          saveStatus.textContent = anyNotesDirty()
+            ? "saved " + outName + " — open this file in PowerPoint (View → Notes)"
+            : "saved " + outName + " (unchanged from upload)";
           saveStatus.classList.add("show");
         }
       } catch (err) {
@@ -615,6 +671,14 @@
       }
     } catch (e) {}
     applySpacing(spacingLevel);
+    try {
+      const fs = localStorage.getItem(FONT_SIZE_PREF_KEY);
+      if (fs !== null && fs !== "") {
+        const n = parseInt(fs, 10);
+        if (!isNaN(n)) fontSizeLevel = n;
+      }
+    } catch (e) {}
+    applyFontSize(fontSizeLevel);
     try {
       const sw = parseInt(localStorage.getItem(STORAGE_PREFIX + "sidebarW") || "", 10);
       if (sw > 0) sidebarW = sw;

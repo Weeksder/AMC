@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-19e";
+  var TOOL_VERSION = "2026-07-19f";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -1206,107 +1206,9 @@
     }
 
     /**
-     * Rebuild notes from source: keep bold runs, drop empty spacer paragraphs
-     * (those caused the huge gaps). No notesMaster (that caused Repair).
+     * Copy notes as-is from source (default formatting / bold / spaces unchanged).
+     * Notes rels only link to the parent slide (no notesMaster into blank = no Repair).
      */
-    function decodeXmlEntities(s) {
-      return String(s)
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'");
-    }
-    function escapeXmlText(s) {
-      return String(s)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-    }
-    /** Visual lines = a:p split on a:br; skip empty spacers. Keep bold per run. */
-    function extractVisualNoteLines(notesXml) {
-      var lines = [];
-      var paras = notesXml.match(/<a:p[\s>][\s\S]*?<\/a:p>/g) || [];
-      paras.forEach(function (p) {
-        var chunks = p.split(
-          /<a:br\b[^/]*\/>|<a:br\b[^>]*>[\s\S]*?<\/a:br>/i
-        );
-        chunks.forEach(function (ch) {
-          var runs = [];
-          var runRe = /<a:r\b[\s\S]*?<\/a:r>/gi;
-          var rm;
-          while ((rm = runRe.exec(ch))) {
-            var run = rm[0];
-            var bold =
-              /\bb="1"|\bb="true"/i.test(run) || /<a:b\b/i.test(run);
-            var tRe = /<a:t\b[^>]*>([\s\S]*?)<\/a:t>/gi;
-            var tm;
-            while ((tm = tRe.exec(run))) {
-              var txt = decodeXmlEntities(tm[1]);
-              if (txt.length) runs.push({ text: txt, bold: bold });
-            }
-          }
-          // Drop empty spacer paragraphs entirely (fixes huge gaps)
-          if (runs.length && runs.some(function (r) { return r.text.trim(); })) {
-            lines.push(runs);
-          }
-        });
-      });
-      return lines;
-    }
-    function buildNotesSlideXmlFromLines(lines) {
-      var parts = [];
-      if (!lines.length) {
-        parts.push('<a:p><a:endParaRPr lang="en-US" dirty="0"/></a:p>');
-      } else {
-        lines.forEach(function (runs) {
-          var inner = runs
-            .map(function (r) {
-              var rPr = ' lang="en-US"';
-              if (r.bold) rPr += ' b="1"';
-              rPr += ' dirty="0"';
-              var space =
-                /^\s|\s$/.test(r.text) ? ' xml:space="preserve"' : "";
-              return (
-                "<a:r><a:rPr" +
-                rPr +
-                "/><a:t" +
-                space +
-                ">" +
-                escapeXmlText(r.text) +
-                "</a:t></a:r>"
-              );
-            })
-            .join("");
-          parts.push("<a:p>" + inner + "</a:p>");
-        });
-      }
-      return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
-        'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
-        "<p:cSld><p:spTree>" +
-        '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
-        '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>' +
-        '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
-        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/>' +
-        '<p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr>' +
-        '<p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>' +
-        '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/>' +
-        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>' +
-        '<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>' +
-        "<p:txBody>" +
-        '<a:bodyPr wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720"/>' +
-        "<a:lstStyle/>" +
-        parts.join("") +
-        "</p:txBody></p:sp>" +
-        "</p:spTree></p:cSld>" +
-        "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>"
-      );
-    }
-
     var addedMeta = [];
     var nextSlideNum = tgtCount + 1;
     var notesCounter = 1;
@@ -1350,12 +1252,17 @@
           if (srcZip.file(notesTarget)) {
             var newNotesName = "notesSlide" + notesCounter + ".xml";
             var newNotesPath = "ppt/notesSlides/" + newNotesName;
+            // Exact source notes XML — no rewrite of bold/spacing
             var srcNotesXml = await srcZip.file(notesTarget).async("string");
-            var noteLines = extractVisualNoteLines(srcNotesXml);
-            tgtZip.file(newNotesPath, buildNotesSlideXmlFromLines(noteLines));
+            srcNotesXml = remapMedia(srcNotesXml);
+            if (srcNotesXml.indexOf("<?xml") !== 0) {
+              srcNotesXml =
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+                srcNotesXml;
+            }
+            tgtZip.file(newNotesPath, srcNotesXml);
             notesPartsAdded.push(newNotesPath);
 
-            // Notes → parent slide only (no notesMaster = no Repair)
             tgtZip.file(
               "ppt/notesSlides/_rels/" + newNotesName + ".rels",
               '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +

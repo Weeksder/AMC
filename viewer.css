@@ -16,6 +16,8 @@
   --notes-line-height: 1.15;
   --notes-para-gap: 0px;
   --notes-blank-gap: 0px;
+  /* Viewer-only notes size (does not affect SAVE / PPTX defaults) */
+  --notes-font-size: 14px;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
@@ -257,7 +259,13 @@ html, body {
   background: #e8f0fe;
   border-color: #8ab4f8;
 }
-.notes-bar .spacing-ctl { display: flex; gap: 2px; }
+.notes-bar .spacing-ctl,
+.notes-bar .font-size-ctl { display: flex; gap: 2px; }
+.notes-bar .font-size-ctl button {
+  min-width: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
 .notes-bar .page-indicator {
   font-size: 11px;
   color: #666;
@@ -275,7 +283,7 @@ html, body {
   padding: 8px 16px 16px;
   /* Desktop PowerPoint notes feel — not Google Docs */
   font-family: Calibri, "Segoe UI", Candara, Arial, sans-serif;
-  font-size: 14px;
+  font-size: var(--notes-font-size);
   line-height: var(--notes-line-height);
   color: #000;
   flex: 1;
@@ -379,5 +387,5 @@ html, body {
     min-height: 22px;
     height: 22px;
   }
-  .notes-body { font-size: 13px; padding: 8px 10px 14px; }
+  .notes-body { padding: 8px 10px 14px; }
 }
