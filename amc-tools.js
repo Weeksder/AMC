@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-18k";
+  var TOOL_VERSION = "2026-07-19a";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -1089,12 +1089,10 @@
   }
 
   /**
-   * Exact port of desktop merge_presentations():
-   * clean selected source slides → insert into target (blank shell) → download.
-   * Media renamed with _src_ prefix (same as Python). No notes cloning.
+   * clean selected source slides → insert into target (blank shell).
+   * Media remapped with _src_ prefix. Speaker notes / footnotes are preserved.
    */
   async function mergePresentations(srcFile, tgtFile, nums, insertAfter) {
-    // Accept File or cached ArrayBuffer (avoids a second full read of large sources)
     var srcData =
       srcFile instanceof ArrayBuffer
         ? srcFile
@@ -1108,20 +1106,22 @@
     var tgtCount = slideNames(tgtZip).length;
     if (insertAfter > tgtCount) insertAfter = tgtCount;
 
-    // Match target slide size to source
+    // Match target slide size (and notes size) to source
     try {
       var srcPrs = await srcZip.file("ppt/presentation.xml").async("string");
       var tgtPrs0 = await tgtZip.file("ppt/presentation.xml").async("string");
       var sz = srcPrs.match(/<p:sldSz\b[^/]*\/>/);
-      if (sz) {
-        if (/<p:sldSz\b[^/]*\/>/.test(tgtPrs0)) {
-          tgtPrs0 = tgtPrs0.replace(/<p:sldSz\b[^/]*\/>/, sz[0]);
-        }
-        tgtZip.file("ppt/presentation.xml", tgtPrs0);
+      if (sz && /<p:sldSz\b[^/]*\/>/.test(tgtPrs0)) {
+        tgtPrs0 = tgtPrs0.replace(/<p:sldSz\b[^/]*\/>/, sz[0]);
       }
+      var nsz = srcPrs.match(/<p:notesSz\b[^/]*\/>/);
+      if (nsz && /<p:notesSz\b[^/]*\/>/.test(tgtPrs0)) {
+        tgtPrs0 = tgtPrs0.replace(/<p:notesSz\b[^/]*\/>/, nsz[0]);
+      }
+      tgtZip.file("ppt/presentation.xml", tgtPrs0);
     } catch (e) {}
 
-    // Media: same as Python — _src_ + original name; longest-first remap
+    // Media: _src_ + original name; longest-first remap
     var mediaMap = {};
     var srcMedia = Object.keys(srcZip.files)
       .filter(function (n) {
@@ -1148,7 +1148,6 @@
 
     function remapMedia(text) {
       if (!text) return text;
-      // Only rewrite media paths (never bare filename — avoids corrupting _src_image1 etc.)
       Object.keys(mediaMap)
         .sort(function (a, b) {
           return b.length - a.length;
@@ -1161,24 +1160,17 @@
       return text;
     }
 
-    /**
-     * Content_Types must stay valid XML. Never rewrite the <Types> opening tag
-     * (that used to stack xmlns= and PowerPoint then refuses the file).
-     */
     function sanitizeContentTypes(ctXml) {
-      // Collapse duplicate xmlns on <Types ...>
       ctXml = ctXml.replace(
         /<Types(?:\s+xmlns="[^"]*")+/g,
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
       );
-      // Ensure single xmlns and clean close of open tag
       if (!/^[\s\S]*<Types\s+xmlns=/.test(ctXml)) {
         ctXml = ctXml.replace(
           /<Types\b/,
           '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
         );
       }
-      // Normalize: <Types xmlns="..."  other?> → keep one xmlns only if mangled
       ctXml = ctXml.replace(
         /<Types\s+xmlns="http:\/\/schemas\.openxmlformats\.org\/package\/2006\/content-types"\s+xmlns="[^"]*"/g,
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"'
@@ -1200,7 +1192,6 @@
       };
       Object.keys(defaults).forEach(function (ext) {
         if (!new RegExp('Extension="' + ext + '"', "i").test(ctXml)) {
-          // Append before </Types> only — never touch the opening <Types> tag
           ctXml = ctXml.replace(
             "</Types>",
             '<Default Extension="' +
@@ -1214,8 +1205,53 @@
       return ctXml;
     }
 
+    // Copy notesMaster from source if target is a blank shell (needed for footnotes)
+    var needNotesMaster = false;
+    var notesMasterCopied = false;
+    try {
+      if (
+        srcZip.file("ppt/notesMasters/notesMaster1.xml") &&
+        !tgtZip.file("ppt/notesMasters/notesMaster1.xml")
+      ) {
+        tgtZip.file(
+          "ppt/notesMasters/notesMaster1.xml",
+          await srcZip.file("ppt/notesMasters/notesMaster1.xml").async("uint8array")
+        );
+        // Point notesMaster at blank's theme1 (source may use theme2)
+        var nmRels =
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>' +
+          "</Relationships>";
+        if (srcZip.file("ppt/notesMasters/_rels/notesMaster1.xml.rels")) {
+          var rawNmRels = await srcZip
+            .file("ppt/notesMasters/_rels/notesMaster1.xml.rels")
+            .async("string");
+          // Force theme to theme1 if present on target
+          rawNmRels = rawNmRels.replace(
+            /Target="[^"]*theme[^"]*"/gi,
+            'Target="../theme/theme1.xml"'
+          );
+          nmRels = rawNmRels;
+        }
+        tgtZip.file("ppt/notesMasters/_rels/notesMaster1.xml.rels", nmRels);
+        notesMasterCopied = true;
+        needNotesMaster = true;
+      } else if (tgtZip.file("ppt/notesMasters/notesMaster1.xml")) {
+        needNotesMaster = true;
+      }
+    } catch (e) {
+      console.warn("notesMaster copy failed", e);
+    }
+
     var addedMeta = [];
     var nextSlideNum = tgtCount + 1;
+    var notesCounter = 1;
+    Object.keys(tgtZip.files).forEach(function (n) {
+      var m = n.match(/^ppt\/notesSlides\/notesSlide(\d+)\.xml$/i);
+      if (m) notesCounter = Math.max(notesCounter, parseInt(m[1], 10) + 1);
+    });
+    var notesPartsAdded = [];
 
     for (var i = 0; i < nums.length; i++) {
       var sn = nums[i];
@@ -1229,7 +1265,6 @@
 
       var xml = await srcZip.file(sp).async("string");
       xml = cleanSlideXmlLikeDesktop(xml);
-      // Desktop also remaps media paths inside slide XML (usually only in rels)
       xml = remapMedia(xml);
       if (xml.indexOf("<?xml") !== 0) {
         xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
@@ -1239,17 +1274,87 @@
       if (srcZip.file(rp)) {
         var rels = await srcZip.file(rp).async("string");
         rels = remapMedia(rels);
-        // Drop notes relationships — desktop does not copy notes; blank has no notesMaster
-        rels = rels.replace(
-          /<Relationship\b[^>]*notesSlide[^>]*\/>/gi,
-          ""
+
+        // Preserve speaker notes / footnotes (copy notes slide part)
+        var notesMatch = rels.match(
+          /Target="([^"]*notesSlides\/notesSlide\d+\.xml)"/i
         );
-        rels = rels.replace(
-          /<Relationship\b[^>]*notesSlide[^>]*>[\s\S]*?<\/Relationship>/gi,
-          ""
-        );
+        if (notesMatch) {
+          var notesTarget = notesMatch[1].replace(/^\.\.\//, "ppt/");
+          if (notesTarget.indexOf("ppt/") !== 0) {
+            notesTarget = "ppt/notesSlides/" + notesTarget.split("/").pop();
+          }
+          if (srcZip.file(notesTarget)) {
+            var newNotesName = "notesSlide" + notesCounter + ".xml";
+            var newNotesPath = "ppt/notesSlides/" + newNotesName;
+            var notesXml = await srcZip.file(notesTarget).async("string");
+            notesXml = remapMedia(notesXml);
+            if (notesXml.indexOf("<?xml") !== 0) {
+              notesXml =
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+                notesXml;
+            }
+            tgtZip.file(newNotesPath, notesXml);
+            notesPartsAdded.push(newNotesPath);
+
+            var oldNotesRels =
+              "ppt/notesSlides/_rels/" + notesTarget.split("/").pop() + ".rels";
+            var newNotesRels = "ppt/notesSlides/_rels/" + newNotesName + ".rels";
+            if (srcZip.file(oldNotesRels)) {
+              var nr = await srcZip.file(oldNotesRels).async("string");
+              nr = remapMedia(nr);
+              // Point back to the new slide number
+              nr = nr.replace(
+                /Target="[^"]*slide\d+\.xml"/gi,
+                'Target="../slides/slide' + newNum + '.xml"'
+              );
+              // Keep notesMaster if present; ensure path is valid
+              if (
+                /notesMaster/i.test(nr) &&
+                !tgtZip.file("ppt/notesMasters/notesMaster1.xml")
+              ) {
+                // Drop notesMaster link if we couldn't copy it
+                nr = nr.replace(
+                  /<Relationship\b[^>]*notesMaster[^>]*\/>/gi,
+                  ""
+                );
+              } else if (/notesMaster/i.test(nr)) {
+                nr = nr.replace(
+                  /Target="[^"]*notesMaster[^"]*"/gi,
+                  'Target="../notesMasters/notesMaster1.xml"'
+                );
+              }
+              tgtZip.file(newNotesRels, nr);
+            } else {
+              // Minimal notes rels
+              var minimalNr =
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide' +
+                newNum +
+                '.xml"/>';
+              if (needNotesMaster) {
+                minimalNr +=
+                  '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="../notesMasters/notesMaster1.xml"/>';
+              }
+              minimalNr += "</Relationships>";
+              tgtZip.file(newNotesRels, minimalNr);
+            }
+
+            rels = rels.replace(
+              /Target="[^"]*notesSlides\/notesSlide\d+\.xml"/gi,
+              'Target="../notesSlides/' + newNotesName + '"'
+            );
+            notesCounter++;
+          } else {
+            // Notes part missing — drop dangling notes relationship
+            rels = rels.replace(/<Relationship\b[^>]*notesSlide[^>]*\/>/gi, "");
+          }
+        }
+
         if (rels.indexOf("<?xml") !== 0) {
-          rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + rels;
+          rels =
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + rels;
         }
         tgtZip.file(nrp, rels);
       } else {
@@ -1269,13 +1374,35 @@
       );
     }
 
-    // presentation.xml.rels — append slide relationships
-    var prsRelsXml = await tgtZip.file("ppt/_rels/presentation.xml.rels").async("string");
+    // presentation.xml.rels — notesMaster (if needed) + slide relationships
+    var prsRelsXml = await tgtZip
+      .file("ppt/_rels/presentation.xml.rels")
+      .async("string");
     var maxRid = 0;
     prsRelsXml.replace(/Id="rId(\d+)"/g, function (_, n) {
       maxRid = Math.max(maxRid, parseInt(n, 10));
       return _;
     });
+
+    var notesMasterRid = null;
+    if (needNotesMaster && notesMasterCopied) {
+      if (!/relationships\/notesMaster/i.test(prsRelsXml)) {
+        notesMasterRid = "rId" + (++maxRid);
+        prsRelsXml = prsRelsXml.replace(
+          "</Relationships>",
+          '<Relationship Id="' +
+            notesMasterRid +
+            '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="notesMasters/notesMaster1.xml"/>' +
+            "</Relationships>"
+        );
+      } else {
+        var nmM = prsRelsXml.match(
+          /Id="(rId\d+)"[^>]*notesMaster|notesMaster[^>]*Id="(rId\d+)"/i
+        );
+        if (nmM) notesMasterRid = nmM[1] || nmM[2];
+      }
+    }
+
     var relChunks = [];
     addedMeta.forEach(function (meta, idx) {
       meta.rid = "rId" + (maxRid + idx + 1);
@@ -1296,13 +1423,25 @@
     );
     tgtZip.file("ppt/_rels/presentation.xml.rels", prsRelsXml);
 
-    // presentation.xml sldIdLst
+    // presentation.xml sldIdLst (+ notesMasterIdLst if we added notesMaster)
     var prsXml = await tgtZip.file("ppt/presentation.xml").async("string");
+    if (
+      notesMasterRid &&
+      !/<p:notesMasterIdLst[\s/>]/.test(prsXml)
+    ) {
+      var nmList =
+        '<p:notesMasterIdLst><p:notesMasterId r:id="' +
+        notesMasterRid +
+        '"/></p:notesMasterIdLst>';
+      if (/<\/p:sldMasterIdLst>/.test(prsXml)) {
+        prsXml = prsXml.replace(
+          /<\/p:sldMasterIdLst>/,
+          "</p:sldMasterIdLst>" + nmList
+        );
+      }
+    }
+
     var maxId = 255;
-    prsXml.replace(/id="(\d+)"/g, function (m, n) {
-      // only track sldId ids when possible
-      return m;
-    });
     prsXml.replace(/<p:sldId\b[^>]*\bid="(\d+)"/g, function (_, n) {
       maxId = Math.max(maxId, parseInt(n, 10));
       return _;
@@ -1319,7 +1458,6 @@
       return tag;
     });
 
-    // Desktop: append new slides then re-order if insert_after < tgt_count
     var ordered;
     if (insertAfter < tgtCount && existingTags.length) {
       ordered = existingTags
@@ -1340,15 +1478,21 @@
         /<\/p:sldMasterIdLst>/,
         "</p:sldMasterIdLst>" + newList
       );
+    } else if (/<\/p:notesMasterIdLst>/.test(prsXml)) {
+      prsXml = prsXml.replace(
+        /<\/p:notesMasterIdLst>/,
+        "</p:notesMasterIdLst>" + newList
+      );
     } else {
       throw new Error("Could not insert sldIdLst into presentation.xml");
     }
     if (prsXml.indexOf("<?xml") !== 0) {
-      prsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + prsXml;
+      prsXml =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + prsXml;
     }
     tgtZip.file("ppt/presentation.xml", prsXml);
 
-    // Content_Types (must remain parseable XML — PowerPoint rejects bad CT entirely)
+    // Content_Types
     var ctXml = await tgtZip.file("[Content_Types].xml").async("string");
     ctXml = ensureImageDefaults(ctXml);
     var ctAdds = [];
@@ -1362,13 +1506,29 @@
         );
       }
     });
+    notesPartsAdded.forEach(function (npath) {
+      var part = "/" + npath;
+      if (ctXml.indexOf('PartName="' + part + '"') < 0) {
+        ctAdds.push(
+          '<Override PartName="' +
+            part +
+            '" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>'
+        );
+      }
+    });
+    if (
+      notesMasterCopied &&
+      ctXml.indexOf('PartName="/ppt/notesMasters/notesMaster1.xml"') < 0
+    ) {
+      ctAdds.push(
+        '<Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>'
+      );
+    }
     if (ctAdds.length) {
       ctXml = ctXml.replace("</Types>", ctAdds.join("") + "</Types>");
     }
-    // Final sanitize + sanity check
     ctXml = sanitizeContentTypes(ctXml);
     if ((ctXml.match(/\sxmlns="/g) || []).length > 1) {
-      // Force a single clean Types root if still mangled
       ctXml = ctXml.replace(
         /<Types[^>]*>/,
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -1379,7 +1539,6 @@
     }
     tgtZip.file("[Content_Types].xml", ctXml);
 
-    // Prefer arraybuffer → Blob for broader browser compatibility
     var ab = await tgtZip.generateAsync({
       type: "arraybuffer",
       compression: "DEFLATE",
@@ -1391,7 +1550,11 @@
     var blob = new Blob([ab], {
       type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     });
-    return { blob: blob, count: addedMeta.length };
+    return {
+      blob: blob,
+      count: addedMeta.length,
+      notesCopied: notesPartsAdded.length,
+    };
   }
 
   function blankTargetFromB64() {
