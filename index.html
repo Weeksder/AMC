@@ -92,11 +92,18 @@
     }
     .btn-primary:active { background: var(--accent-hover); }
     .btn-primary:disabled { opacity: 0.55; cursor: default; }
+    .btn-shortcuts {
+      background: #4a5568;
+      color: #fff;
+      width: 100%;
+      margin-top: 16px;
+    }
+    .btn-shortcuts:active { background: #2d3748; }
     .btn-amc {
       background: #2b6cb0;
       color: #fff;
       width: 100%;
-      margin-top: 16px;
+      margin-top: 10px;
     }
     .btn-amc:active { background: #2c5282; }
     .feedback-row {
@@ -314,6 +321,7 @@
       </div>
     </div>
 
+    <button type="button" class="btn btn-shortcuts" id="btnKeyboardShortcuts" title="View keyboard shortcuts">Keyboard shortcut</button>
     <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Teacher Login</a>
 
     <div class="feedback-row">
@@ -396,6 +404,19 @@
             "view (n.) — what you can see from a place or perspective\n" +
             "Lyle booked early to get a seat with a good view of the stage.",
         },
+        shortcuts: {
+          key: "amc_keyboard_shortcuts_v1",
+          label: "Keyboard shortcut",
+          title: "Keyboard shortcuts",
+          defaultText:
+            "Win + V — remember copy history\n\n" +
+            "F2 — rename folders faster\n\n" +
+            "F12 — Save as\n\n" +
+            "Alt + Space + N — minimize window\n" +
+            "Alt + Space + X — maximize window\n\n" +
+            "Shift + Delete — permanently delete files\n" +
+            "without going through the Recycle Bin",
+        },
       };
 
       var drop = document.getElementById("drop");
@@ -403,6 +424,7 @@
       var btnOpen = document.getElementById("btnOpen");
       var btnAmc = document.getElementById("btnAmcClass");
       var statusEl = document.getElementById("status");
+      var btnKeyboardShortcuts = document.getElementById("btnKeyboardShortcuts");
       var btnFeedbackCopy = document.getElementById("btnFeedbackCopy");
       var btnFeedbackEdit = document.getElementById("btnFeedbackEdit");
       var btnSentencesCopy = document.getElementById("btnSentencesCopy");
@@ -491,6 +513,11 @@
         if (snippetModal) snippetModal.classList.remove("open");
       }
 
+      if (btnKeyboardShortcuts) {
+        btnKeyboardShortcuts.addEventListener("click", function () {
+          openSnippetEditor("shortcuts");
+        });
+      }
       if (btnFeedbackCopy) {
         btnFeedbackCopy.addEventListener("click", function () {
           copySnippet("feedback");
@@ -546,6 +573,7 @@
           "<li>Press <strong>SAVE</strong> to download a PowerPoint with your notes written into the file.</li>" +
           "<li>Open the downloaded <code>*_notes.pptx</code> in PowerPoint and use <em>View → Notes</em>.</li>" +
           "</ul>" +
+          "<p><strong>Keyboard shortcut</strong> opens a list of useful Windows shortcuts (same preview window as ✏️ edit).</p>" +
           "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
           "<p><strong>AMC Teacher Login</strong> opens your teacher login page.</p>",
         studio:
