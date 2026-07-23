@@ -40,6 +40,12 @@ viewer.css
 viewer.js
 pptx-loader.js
 jszip.min.js
+amc-studio.html
+amc-tools.js
+amc-tools.css
+blank-target.pptx
+blank-target-data.js
+4U20260616_How_Does_a_Website_Remember_You_A_Simple_Guide_to_Cookie_Part2_P.pptx
 README.md
 ```
 
@@ -60,7 +66,7 @@ README.md
 | `jszip.min.js` | Shared PPTX zip library |
 | `pptx-loader.js` / `viewer.js` / `viewer.css` | Notes viewer |
 
-Upload **all** of these files to GitHub Pages (including **`blank-target.pptx`** — required for Slide Extractor).
+Upload **all** of these files to GitHub Pages (including **`blank-target.pptx`** for Slide Extractor, and the full **`4U20260616_..._Part2_P.pptx`** file for the **Sample pptx** download button under AMC Teacher Login — downloads keep that original filename).
 
 ## Features
 
