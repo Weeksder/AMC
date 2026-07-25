@@ -338,7 +338,7 @@
 
     <button type="button" class="btn btn-shortcuts" id="btnKeyboardShortcuts" title="View keyboard shortcuts">Keyboard shortcut</button>
     <a class="btn btn-amc" id="btnAmcClass" href="#" target="_blank" rel="noopener noreferrer">AMC Teacher Login</a>
-    <button type="button" class="btn btn-youtube" id="btnYoutubeChannel" title="Copy YouTube channel link">YouTube Channel</button>
+    <a class="btn btn-youtube" id="btnYoutubeChannel" href="#" target="_blank" rel="noopener noreferrer" title="Open YouTube channel">YouTube Channel</a>
     <a class="btn btn-sample-pptx" href="4U20260616_How_Does_a_Website_Remember_You_A_Simple_Guide_to_Cookie_Part2_P.pptx" download="4U20260616_How_Does_a_Website_Remember_You_A_Simple_Guide_to_Cookie_Part2_P.pptx">Sample pptx</a>
 
     <div class="feedback-row">
@@ -467,43 +467,15 @@
         });
       }
 
-      async function copyTextToClipboard(text) {
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-          }
-        } catch (e) {}
-        try {
-          var ta = document.createElement("textarea");
-          ta.value = text;
-          ta.setAttribute("readonly", "");
-          ta.style.position = "fixed";
-          ta.style.left = "-9999px";
-          document.body.appendChild(ta);
-          ta.select();
-          var ok = document.execCommand("copy");
-          document.body.removeChild(ta);
-          return !!ok;
-        } catch (err) {
-          return false;
-        }
-      }
-
       if (btnYoutubeChannel) {
-        btnYoutubeChannel.addEventListener("click", async function () {
-          var url = YOUTUBE_CHANNEL_URL || "";
-          if (!url) {
+        if (YOUTUBE_CHANNEL_URL) {
+          btnYoutubeChannel.href = YOUTUBE_CHANNEL_URL;
+        } else {
+          btnYoutubeChannel.addEventListener("click", function (e) {
+            e.preventDefault();
             setStatus("YouTube link not set in index.html.", "error");
-            return;
-          }
-          var ok = await copyTextToClipboard(url);
-          if (ok) {
-            setStatus("YouTube Channel link copied.", "ok");
-          } else {
-            setStatus("Could not copy — select and copy manually: " + url, "error");
-          }
-        });
+          });
+        }
       }
 
       function setStatus(msg, kind) {
@@ -637,7 +609,7 @@
           "<p><strong>Keyboard shortcut</strong> opens a list of useful Windows shortcuts (same preview window as ✏️ edit).</p>" +
           "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
           "<p><strong>AMC Teacher Login</strong> opens your teacher login page.</p>" +
-          "<p><strong>YouTube Channel</strong> (red) copies your YouTube Studio / channel link to the clipboard.</p>",
+          "<p><strong>YouTube Channel</strong> (red) opens your YouTube Studio / channel page.</p>",
         studio:
           "<p><strong>AMC Productivity Studio</strong> tools appear in the frame below. Use the <strong>?</strong> on each tool tab for details.</p>" +
           "<ul>" +
