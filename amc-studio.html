@@ -210,7 +210,7 @@
           Choose image
           <input type="file" id="ocrFile" accept="image/*" hidden>
         </label>
-        <button type="button" class="btn" id="ocrPasteHint">Paste image into page</button>
+        <button type="button" class="btn" id="ocrPasteHint" title="Read image from clipboard, or press Ctrl+V after">Paste image (clipboard)</button>
         <button type="button" class="btn" id="ocrCopy">Copy text</button>
         <button type="button" class="btn" id="ocrClear">Clear</button>
       </div>
@@ -227,10 +227,10 @@
     </div>
   </div>
 
-  <script src="jszip.min.js?v=20260719g"></script>
-  <script src="blank-target-data.js?v=20260719g"></script>
-  <script src="pptx-loader.js?v=20260719g"></script>
-  <script src="amc-tools.js?v=20260719g"></script>
+  <script src="jszip.min.js?v=20260721a"></script>
+  <script src="blank-target-data.js?v=20260721a"></script>
+  <script src="pptx-loader.js?v=20260721a"></script>
+  <script src="amc-tools.js?v=20260721a"></script>
   <script>
     (function () {
       var HELP = {
@@ -281,7 +281,10 @@
           body:
             "<p>Reads text from an image using OCR in your browser.</p>" +
             "<ul>" +
-            "<li>Choose an image or paste with <strong>Ctrl+V</strong> / <strong>Cmd+V</strong>.</li>" +
+            "<li>Open the <strong>Text Extractor</strong> tab first.</li>" +
+            "<li><strong>Choose image</strong>, or <strong>Paste image</strong> (reads clipboard), or <strong>Ctrl+V</strong> after a screenshot (Win+Shift+S).</li>" +
+            "<li>You can also <strong>drag and drop</strong> a PNG/JPG onto the panel.</li>" +
+            "<li>If the tools are inside the home page frame, click inside the Text Extractor area before pasting.</li>" +
             "<li>Needs internet once to load the OCR engine.</li>" +
             "<li>Copy the extracted text with <strong>Copy text</strong>.</li>" +
             "</ul>",

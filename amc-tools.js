@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-19f";
+  var TOOL_VERSION = "2026-07-21-ocr-paste";
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -525,16 +525,137 @@
   var ocrText = $("ocrText");
   var ocrStatus = $("ocrStatus");
   var ocrFile = $("ocrFile");
+  var ocrPanel = $("panel-ocr");
+  var ocrPasteHint = $("ocrPasteHint");
+  var ocrBusy = false;
+
+  function isOcrPanelActive() {
+    return !!(ocrPanel && ocrPanel.classList.contains("active"));
+  }
+
+  function ensureOcrTabActive() {
+    var tab = document.querySelector('.tab[data-tab="ocr"]');
+    if (tab && !isOcrPanelActive()) tab.click();
+  }
+
+  /**
+   * Pull an image blob from a paste/drop event.
+   * Win+Shift+S / Snipping Tool often use files[], empty type, or HTML image.
+   */
+  function imageBlobFromClipboardData(cd) {
+    if (!cd) return null;
+    var i, it, f, type;
+
+    // 1) DataTransferItemList — preferred
+    if (cd.items && cd.items.length) {
+      for (i = 0; i < cd.items.length; i++) {
+        it = cd.items[i];
+        type = (it.type || "").toLowerCase();
+        if (it.kind === "file" && type.indexOf("image/") === 0) {
+          f = it.getAsFile();
+          if (f) return f;
+        }
+      }
+      // Screenshot with empty MIME (some Edge/Chrome builds)
+      for (i = 0; i < cd.items.length; i++) {
+        it = cd.items[i];
+        if (it.kind === "file") {
+          f = it.getAsFile();
+          if (f && f.size > 0 && (!f.type || f.type.indexOf("image/") === 0 || f.type === "application/octet-stream")) {
+            // Prefer if name looks like image or type empty (common for screen capture)
+            if (!f.type || f.type.indexOf("image/") === 0 || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name || "")) {
+              return f;
+            }
+            // Last resort: unnamed clipboard file with size (screen grab)
+            if (!f.type && (!f.name || f.name === "image.png" || f.name === "blob")) {
+              return f;
+            }
+          }
+        }
+      }
+    }
+
+    // 2) files list (Snipping Tool / Explorer copy)
+    if (cd.files && cd.files.length) {
+      for (i = 0; i < cd.files.length; i++) {
+        f = cd.files[i];
+        if (!f) continue;
+        if (!f.type || f.type.indexOf("image/") === 0) return f;
+        if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name || "")) return f;
+      }
+    }
+
+    // 3) HTML clipboard with <img src="data:image/...">
+    try {
+      var html = cd.getData && cd.getData("text/html");
+      if (html && /data:image\//i.test(html)) {
+        var m = html.match(/src\s*=\s*["'](data:image\/[a-zA-Z0-9.+-]+;base64,[^"']+)["']/i);
+        if (m && m[1]) {
+          return dataUrlToBlob(m[1]);
+        }
+      }
+    } catch (e) {}
+
+    return null;
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    try {
+      var parts = String(dataUrl).split(",");
+      var meta = parts[0] || "";
+      var b64 = parts[1] || "";
+      var mime = (meta.match(/data:([^;]+)/) || [])[1] || "image/png";
+      var bin = atob(b64);
+      var arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new Blob([arr], { type: mime });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Clipboard API (async) — works when paste event has no image items. */
+  async function imageBlobFromClipboardApi() {
+    if (!navigator.clipboard || !navigator.clipboard.read) return null;
+    try {
+      var items = await navigator.clipboard.read();
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var types = item.types || [];
+        for (var t = 0; t < types.length; t++) {
+          if (String(types[t]).indexOf("image/") === 0) {
+            return await item.getType(types[t]);
+          }
+        }
+      }
+    } catch (e) {
+      // NotAllowedError / insecure context — caller shows message
+      return null;
+    }
+    return null;
+  }
 
   async function runOcrOnBlob(blob) {
+    if (!blob) {
+      setStatus(ocrStatus, "No image to OCR.", "err");
+      return;
+    }
+    if (ocrBusy) {
+      setStatus(ocrStatus, "OCR already running…", "err");
+      return;
+    }
+    ocrBusy = true;
+    ensureOcrTabActive();
     setStatus(ocrStatus, "Loading OCR engine…");
     try {
       await ensureTesseract();
     } catch (e) {
+      ocrBusy = false;
       setStatus(ocrStatus, e.message || "OCR engine failed to load.", "err");
       return;
     }
     if (typeof Tesseract === "undefined") {
+      ocrBusy = false;
       setStatus(ocrStatus, "Tesseract.js failed to load (need internet once for CDN).", "err");
       return;
     }
@@ -548,46 +669,120 @@
         },
       });
       var text = (result && result.data && result.data.text ? result.data.text : "").trim();
-      ocrText.value = text || "[No text detected]";
+      if (ocrText) ocrText.value = text || "[No text detected]";
       setStatus(ocrStatus, text ? "Done — you can Copy." : "No text found.", text ? "ok" : "err");
     } catch (e) {
       console.error(e);
       setStatus(ocrStatus, "OCR error: " + (e.message || e), "err");
     }
+    ocrBusy = false;
   }
 
-  ocrFile.addEventListener("change", function () {
-    var f = ocrFile.files && ocrFile.files[0];
-    if (f) runOcrOnBlob(f);
-  });
+  if (ocrFile) {
+    ocrFile.addEventListener("change", function () {
+      var f = ocrFile.files && ocrFile.files[0];
+      if (f) runOcrOnBlob(f);
+      // allow re-choosing the same file
+      try {
+        ocrFile.value = "";
+      } catch (e) {}
+    });
+  }
 
-  document.addEventListener("paste", function (e) {
-    if (!$("panel-ocr").classList.contains("active")) return;
-    var items = e.clipboardData && e.clipboardData.items;
-    if (!items) return;
-    for (var i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf("image") === 0) {
-        e.preventDefault();
-        runOcrOnBlob(items[i].getAsFile());
+  async function handleOcrPasteEvent(e) {
+    if (!isOcrPanelActive()) return false;
+    var blob = imageBlobFromClipboardData(e.clipboardData || e.originalEvent && e.originalEvent.clipboardData);
+    if (blob) {
+      e.preventDefault();
+      e.stopPropagation();
+      runOcrOnBlob(blob);
+      return true;
+    }
+    return false;
+  }
+
+  // Capture phase so we win over textarea default paste when an image is present
+  document.addEventListener(
+    "paste",
+    function (e) {
+      handleOcrPasteEvent(e);
+    },
+    true
+  );
+  window.addEventListener(
+    "paste",
+    function (e) {
+      handleOcrPasteEvent(e);
+    },
+    true
+  );
+
+  // "Paste image" button — Clipboard API or guided Ctrl+V
+  if (ocrPasteHint) {
+    ocrPasteHint.addEventListener("click", async function () {
+      ensureOcrTabActive();
+      setStatus(ocrStatus, "Reading clipboard…");
+      var blob = await imageBlobFromClipboardApi();
+      if (blob) {
+        runOcrOnBlob(blob);
         return;
       }
-    }
-  });
+      // Focus a target so the next Ctrl+V is received inside this frame
+      if (ocrText) {
+        try {
+          ocrText.focus();
+        } catch (e) {}
+      }
+      setStatus(
+        ocrStatus,
+        "No image in clipboard API. Click here, then press Ctrl+V (Win+Shift+S first to capture).",
+        "err"
+      );
+    });
+  }
 
-  $("ocrCopy").addEventListener("click", async function () {
-    try {
-      await navigator.clipboard.writeText(ocrText.value || "");
-      setStatus(ocrStatus, "Copied.", "ok");
-    } catch (e) {
-      ocrText.select();
-      document.execCommand("copy");
-      setStatus(ocrStatus, "Copied.", "ok");
-    }
-  });
-  $("ocrClear").addEventListener("click", function () {
-    ocrText.value = "";
-    setStatus(ocrStatus, "Ready");
-  });
+  // Drag & drop image onto Text Extractor panel
+  if (ocrPanel) {
+    ["dragenter", "dragover"].forEach(function (ev) {
+      ocrPanel.addEventListener(ev, function (e) {
+        if (!isOcrPanelActive()) return;
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+    ocrPanel.addEventListener("drop", function (e) {
+      if (!isOcrPanelActive()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var blob = imageBlobFromClipboardData(e.dataTransfer);
+      if (blob) {
+        runOcrOnBlob(blob);
+      } else {
+        setStatus(ocrStatus, "Drop a PNG/JPG image file.", "err");
+      }
+    });
+  }
+
+  var ocrCopyBtn = $("ocrCopy");
+  if (ocrCopyBtn) {
+    ocrCopyBtn.addEventListener("click", async function () {
+      try {
+        await navigator.clipboard.writeText((ocrText && ocrText.value) || "");
+        setStatus(ocrStatus, "Copied.", "ok");
+      } catch (e) {
+        if (ocrText) ocrText.select();
+        document.execCommand("copy");
+        setStatus(ocrStatus, "Copied.", "ok");
+      }
+    });
+  }
+  var ocrClearBtn = $("ocrClear");
+  if (ocrClearBtn) {
+    ocrClearBtn.addEventListener("click", function () {
+      if (ocrText) ocrText.value = "";
+      setStatus(ocrStatus, "Ready");
+    });
+  }
 
   // ---- PPTX helpers ----
   function slideNames(zip) {
