@@ -78,6 +78,7 @@ Upload **all** of these files to GitHub Pages (including **`blank-target.pptx`**
 - Text Extractor (image OCR)
 - PPTX Slide Extractor (merge slides)
 - Image Stripper
+- PNG White BG (transparent PNG → solid white background)
 - Special Strip
 - Text Formatter
 

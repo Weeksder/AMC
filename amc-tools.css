@@ -143,6 +143,136 @@ textarea, .fmt-out {
   font-size: 0.9rem;
 }
 .file-list li:last-child { border-bottom: none; }
+
+/* PNG White Background tool */
+.whitebg-drop {
+  margin-bottom: 12px;
+}
+.whitebg-actions {
+  margin-top: 4px;
+}
+.whitebg-previews {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 700px) {
+  .whitebg-previews { grid-template-columns: 1fr; }
+}
+.whitebg-preview-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.whitebg-preview-label {
+  display: block;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-bottom: 1px solid #eee;
+  background: #f7f7f7;
+}
+.whitebg-preview-frame {
+  min-height: 160px;
+  max-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  overflow: auto;
+}
+.whitebg-preview-frame img {
+  max-width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  display: block;
+}
+/* Checkerboard so transparent pixels are visible */
+.whitebg-checker {
+  background-color: #ddd;
+  background-image:
+    linear-gradient(45deg, #bbb 25%, transparent 25%),
+    linear-gradient(-45deg, #bbb 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #bbb 75%),
+    linear-gradient(-45deg, transparent 75%, #bbb 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.whitebg-solid {
+  background: #fff;
+}
+
+/* Clip / crop stage */
+.whitebg-crop-stage {
+  margin: 12px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f5f5f5;
+  padding: 10px;
+}
+.whitebg-crop-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: 0 auto;
+  left: 50%;
+  transform: translateX(-50%);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.whitebg-crop-wrap img {
+  display: block;
+  max-width: 100%;
+  max-height: min(55vh, 420px);
+  width: auto;
+  height: auto;
+  pointer-events: none;
+}
+.whitebg-crop-box {
+  position: absolute;
+  border: 2px solid #0078d4;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  cursor: move;
+  box-sizing: border-box;
+}
+.whitebg-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border: 2px solid #0078d4;
+  border-radius: 3px;
+  box-sizing: border-box;
+  z-index: 2;
+}
+.whitebg-handle.nw { left: -9px; top: -9px; cursor: nwse-resize; }
+.whitebg-handle.ne { right: -9px; top: -9px; cursor: nesw-resize; }
+.whitebg-handle.sw { left: -9px; bottom: -9px; cursor: nesw-resize; }
+.whitebg-handle.se { right: -9px; bottom: -9px; cursor: nwse-resize; }
+.whitebg-handle.n { left: 50%; top: -9px; margin-left: -9px; cursor: ns-resize; }
+.whitebg-handle.s { left: 50%; bottom: -9px; margin-left: -9px; cursor: ns-resize; }
+.whitebg-handle.e { right: -9px; top: 50%; margin-top: -9px; cursor: ew-resize; }
+.whitebg-handle.w { left: -9px; top: 50%; margin-top: -9px; cursor: ew-resize; }
+.whitebg-crop-actions {
+  margin-top: 10px;
+  justify-content: center;
+}
+@media (pointer: coarse) {
+  .whitebg-handle {
+    width: 28px;
+    height: 28px;
+  }
+  .whitebg-handle.nw, .whitebg-handle.sw, .whitebg-handle.w { left: -14px; }
+  .whitebg-handle.ne, .whitebg-handle.se, .whitebg-handle.e { right: -14px; }
+  .whitebg-handle.nw, .whitebg-handle.ne, .whitebg-handle.n { top: -14px; }
+  .whitebg-handle.sw, .whitebg-handle.se, .whitebg-handle.s { bottom: -14px; }
+  .whitebg-handle.n, .whitebg-handle.s { margin-left: -14px; }
+  .whitebg-handle.e, .whitebg-handle.w { margin-top: -14px; }
+}
+
 .foot {
   max-width: 960px;
   margin: 0 auto;

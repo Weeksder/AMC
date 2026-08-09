@@ -103,6 +103,7 @@
     <button type="button" class="tab" data-tab="special">Special Strip</button>
     <button type="button" class="tab" data-tab="fmt">Text Formatter</button>
     <button type="button" class="tab" data-tab="ocr">Text Extractor</button>
+    <button type="button" class="tab" data-tab="whitebg">PNG White BG</button>
   </nav>
 
   <main>
@@ -217,6 +218,57 @@
       <p class="status" id="ocrStatus">Ready</p>
       <textarea id="ocrText" placeholder="Extracted text appears here…"></textarea>
     </section>
+
+    <section class="panel" id="panel-whitebg">
+      <div class="panel-head">
+        <h2>PNG White Background</h2>
+        <button type="button" class="help-btn" data-help="whitebg" title="Help" aria-label="Help">?</button>
+      </div>
+      <div class="drop whitebg-drop" id="whitebgDrop" tabindex="0" role="button" aria-label="Add PNG image">
+        <strong id="whitebgDropTitle">Add PNG</strong>
+        <span id="whitebgLabel">Click / tap · drag &amp; drop · Ctrl+V / paste</span>
+        <input type="file" id="whitebgFile" accept="image/png,image/*,.png" hidden>
+      </div>
+      <div class="row whitebg-actions" id="whitebgActions" hidden>
+        <button type="button" class="btn" id="whitebgClip">Clip</button>
+        <button type="button" class="btn primary" id="whitebgDownload" disabled>Download</button>
+        <button type="button" class="btn" id="whitebgClear">Clear</button>
+      </div>
+      <div class="whitebg-crop-stage" id="whitebgCropStage" hidden>
+        <div class="whitebg-crop-wrap" id="whitebgCropWrap">
+          <img id="whitebgCropImg" alt="Crop preview" draggable="false">
+          <div class="whitebg-crop-box" id="whitebgCropBox">
+            <span class="whitebg-handle nh" data-handle="n"></span>
+            <span class="whitebg-handle s" data-handle="s"></span>
+            <span class="whitebg-handle e" data-handle="e"></span>
+            <span class="whitebg-handle w" data-handle="w"></span>
+            <span class="whitebg-handle nw" data-handle="nw"></span>
+            <span class="whitebg-handle ne" data-handle="ne"></span>
+            <span class="whitebg-handle sw" data-handle="sw"></span>
+            <span class="whitebg-handle se" data-handle="se"></span>
+          </div>
+        </div>
+        <div class="row whitebg-crop-actions">
+          <button type="button" class="btn primary" id="whitebgCropApply">Apply clip</button>
+          <button type="button" class="btn" id="whitebgCropCancel">Cancel</button>
+        </div>
+      </div>
+      <p class="status" id="whitebgStatus" hidden></p>
+      <div class="whitebg-previews" id="whitebgPreviews" hidden>
+        <div class="whitebg-preview-card">
+          <span class="whitebg-preview-label">Original</span>
+          <div class="whitebg-preview-frame whitebg-checker">
+            <img id="whitebgOrig" alt="Original with transparency">
+          </div>
+        </div>
+        <div class="whitebg-preview-card">
+          <span class="whitebg-preview-label">Result</span>
+          <div class="whitebg-preview-frame whitebg-solid">
+            <img id="whitebgResult" alt="Converted with white background">
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div class="help-modal" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
@@ -230,7 +282,7 @@
   <script src="jszip.min.js?v=20260721a"></script>
   <script src="blank-target-data.js?v=20260721a"></script>
   <script src="pptx-loader.js?v=20260721a"></script>
-  <script src="amc-tools.js?v=20260721a"></script>
+  <script src="amc-tools.js?v=20260809-whitebg-v4"></script>
   <script>
     (function () {
       var HELP = {
@@ -287,6 +339,17 @@
             "<li>If the tools are inside the home page frame, click inside the Text Extractor area before pasting.</li>" +
             "<li>Needs internet once to load the OCR engine.</li>" +
             "<li>Copy the extracted text with <strong>Copy text</strong>.</li>" +
+            "</ul>",
+        },
+        whitebg: {
+          title: "Help — PNG White Background",
+          body:
+            "<p>Clip and/or put clipart onto a <strong>solid white background</strong>.</p>" +
+            "<ul>" +
+            "<li>Add a PNG (click / drop / paste).</li>" +
+            "<li><strong>Clip</strong> — drag the box (or handles) with mouse or finger, then <strong>Apply clip</strong>.</li>" +
+            "<li>White background is applied only when the image looks transparent / checkerboard; solid photos are left as-is (after clip/size).</li>" +
+            "<li><strong>Download</strong> saves <code>*_whitebg.png</code>. Files over 500 KB are auto-shrunk.</li>" +
             "</ul>",
         },
       };

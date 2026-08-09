@@ -4,7 +4,8 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-07-21-ocr-paste";
+  var TOOL_VERSION = "2026-08-09-whitebg-v4";
+  var WHITEBG_MAX_BYTES = 500 * 1024; // 500 KB
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
   } catch (e) {}
@@ -705,6 +706,7 @@
   document.addEventListener(
     "paste",
     function (e) {
+      if (handleWhitebgPasteEvent(e)) return;
       handleOcrPasteEvent(e);
     },
     true
@@ -712,6 +714,7 @@
   window.addEventListener(
     "paste",
     function (e) {
+      if (handleWhitebgPasteEvent(e)) return;
       handleOcrPasteEvent(e);
     },
     true
@@ -781,6 +784,711 @@
     ocrClearBtn.addEventListener("click", function () {
       if (ocrText) ocrText.value = "";
       setStatus(ocrStatus, "Ready");
+    });
+  }
+
+  // ---- PNG White Background ----
+  var whitebgPanel = $("panel-whitebg");
+  var whitebgStatus = $("whitebgStatus");
+  var whitebgDrop = $("whitebgDrop");
+  var whitebgLabel = $("whitebgLabel");
+  var whitebgDropTitle = $("whitebgDropTitle");
+  var whitebgFile = $("whitebgFile");
+  var whitebgDownload = $("whitebgDownload");
+  var whitebgClear = $("whitebgClear");
+  var whitebgClip = $("whitebgClip");
+  var whitebgActions = $("whitebgActions");
+  var whitebgPreviews = $("whitebgPreviews");
+  var whitebgOrig = $("whitebgOrig");
+  var whitebgResult = $("whitebgResult");
+  var whitebgCropStage = $("whitebgCropStage");
+  var whitebgCropWrap = $("whitebgCropWrap");
+  var whitebgCropImg = $("whitebgCropImg");
+  var whitebgCropBox = $("whitebgCropBox");
+  var whitebgCropApply = $("whitebgCropApply");
+  var whitebgCropCancel = $("whitebgCropCancel");
+  var whitebgSourceBlob = null;
+  var whitebgSourceName = "image.png";
+  var whitebgResultBlob = null;
+  var whitebgBusy = false;
+  var WHITEBG_HINT = "Click / tap · drag & drop · Ctrl+V / paste";
+  // Crop state in natural image pixels: {x, y, w, h, imgW, imgH}
+  var whitebgCrop = null;
+  var whitebgCropDrag = null;
+
+  function isWhitebgPanelActive() {
+    return !!(whitebgPanel && whitebgPanel.classList.contains("active"));
+  }
+
+  function ensureWhitebgTabActive() {
+    var tab = document.querySelector('.tab[data-tab="whitebg"]');
+    if (tab && !isWhitebgPanelActive()) tab.click();
+  }
+
+  function revokeImgUrl(img) {
+    if (!img) return;
+    var u = img.getAttribute("src");
+    if (u && u.indexOf("blob:") === 0) {
+      try {
+        URL.revokeObjectURL(u);
+      } catch (e) {}
+    }
+  }
+
+  function showWhitebgStatus(msg, kind) {
+    if (!whitebgStatus) return;
+    if (!msg) {
+      whitebgStatus.hidden = true;
+      whitebgStatus.textContent = "";
+      whitebgStatus.className = "status";
+      return;
+    }
+    whitebgStatus.hidden = false;
+    setStatus(whitebgStatus, msg, kind);
+  }
+
+  function exitWhitebgCropMode() {
+    whitebgCropDrag = null;
+    if (whitebgCropStage) whitebgCropStage.hidden = true;
+    revokeImgUrl(whitebgCropImg);
+    if (whitebgCropImg) whitebgCropImg.removeAttribute("src");
+    if (whitebgPreviews) whitebgPreviews.hidden = !whitebgSourceBlob;
+    if (whitebgActions) whitebgActions.hidden = !whitebgSourceBlob;
+  }
+
+  function clearWhitebg() {
+    exitWhitebgCropMode();
+    whitebgSourceBlob = null;
+    whitebgResultBlob = null;
+    whitebgSourceName = "image.png";
+    whitebgCrop = null;
+    if (whitebgDropTitle) whitebgDropTitle.textContent = "Add PNG";
+    if (whitebgLabel) whitebgLabel.textContent = WHITEBG_HINT;
+    if (whitebgDownload) whitebgDownload.disabled = true;
+    if (whitebgActions) whitebgActions.hidden = true;
+    if (whitebgPreviews) whitebgPreviews.hidden = true;
+    revokeImgUrl(whitebgOrig);
+    revokeImgUrl(whitebgResult);
+    revokeImgUrl(whitebgCropImg);
+    if (whitebgOrig) whitebgOrig.removeAttribute("src");
+    if (whitebgResult) whitebgResult.removeAttribute("src");
+    if (whitebgCropImg) whitebgCropImg.removeAttribute("src");
+    showWhitebgStatus("");
+  }
+
+  function whitebgOutName(name) {
+    var baseName = (name || "image.png").replace(/\.[^.]+$/, "");
+    if (!baseName) baseName = "image";
+    return baseName + "_whitebg.png";
+  }
+
+  /** True if pixel looks like a transparent / checker / plain light backdrop. */
+  function isBackdropPixel(r, g, b, a) {
+    if (a < 40) return true;
+    var maxc = Math.max(r, g, b);
+    var minc = Math.min(r, g, b);
+    var chroma = maxc - minc;
+    var lum = (r + g + b) / 3;
+    // Light gray / white / typical PNG checkerboard squares (incl. ~231 gray)
+    if (chroma <= 22 && lum >= 175) return true;
+    // Near-white with slight tint (export artifacts)
+    if (chroma <= 30 && lum >= 235) return true;
+    // Semi-transparent light pixels
+    if (a < 230 && chroma <= 28 && lum >= 190) return true;
+    return false;
+  }
+
+  /**
+   * Mark backdrop pixels connected to the image border (4-connected).
+   * Handles real transparency and baked-in checkerboards without eating
+   * interior whites (eyes/teeth) surrounded by the subject.
+   */
+  function markBorderConnectedBackdrop(data, w, h) {
+    var d = data.data;
+    var n = w * h;
+    var bg = new Uint8Array(n); // 1 = backdrop
+    var queue = new Int32Array(n);
+    var qh = 0;
+    var qt = 0;
+
+    function tryPush(x, y) {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      var i = y * w + x;
+      if (bg[i]) return;
+      var o = i * 4;
+      if (!isBackdropPixel(d[o], d[o + 1], d[o + 2], d[o + 3])) return;
+      bg[i] = 1;
+      queue[qt++] = i;
+    }
+
+    var x, y;
+    for (x = 0; x < w; x++) {
+      tryPush(x, 0);
+      tryPush(x, h - 1);
+    }
+    for (y = 0; y < h; y++) {
+      tryPush(0, y);
+      tryPush(w - 1, y);
+    }
+
+    while (qh < qt) {
+      var i = queue[qh++];
+      var cx = i % w;
+      var cy = (i / w) | 0;
+      tryPush(cx - 1, cy);
+      tryPush(cx + 1, cy);
+      tryPush(cx, cy - 1);
+      tryPush(cx, cy + 1);
+    }
+    return bg;
+  }
+
+  /**
+   * Process image:
+   * - If transparent / checkerboard backdrop detected → solid white BG
+   * - Otherwise leave colors as-is (still force full opacity)
+   * Returns Promise<Blob> PNG.
+   */
+  function convertToWhiteBackground(blob) {
+    return new Promise(function (resolve, reject) {
+      if (!blob) {
+        reject(new Error("No image."));
+        return;
+      }
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth || img.width;
+          var h = img.naturalHeight || img.height;
+          if (!w || !h) {
+            URL.revokeObjectURL(url);
+            reject(new Error("Could not read image size."));
+            return;
+          }
+          var canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+
+          var imageData = ctx.getImageData(0, 0, w, h);
+          var d = imageData.data;
+          var bg = markBorderConnectedBackdrop(imageData, w, h);
+          var i, o, a, r, g, b, af;
+          var transparentCount = 0;
+          var bgCount = 0;
+          var total = w * h;
+
+          for (i = 0; i < total; i++) {
+            o = i * 4;
+            if (d[o + 3] < 250) transparentCount++;
+            if (bg[i]) bgCount++;
+          }
+
+          // Only change background when image looks transparent / checkerboard
+          var needsWhiteBg =
+            transparentCount > total * 0.005 || bgCount > total * 0.02;
+
+          if (needsWhiteBg) {
+            for (i = 0; i < total; i++) {
+              o = i * 4;
+              r = d[o];
+              g = d[o + 1];
+              b = d[o + 2];
+              a = d[o + 3];
+              if (bg[i] || a < 40) {
+                d[o] = 255;
+                d[o + 1] = 255;
+                d[o + 2] = 255;
+                d[o + 3] = 255;
+              } else if (a < 255) {
+                af = a / 255;
+                d[o] = Math.round(r * af + 255 * (1 - af));
+                d[o + 1] = Math.round(g * af + 255 * (1 - af));
+                d[o + 2] = Math.round(b * af + 255 * (1 - af));
+                d[o + 3] = 255;
+              } else {
+                d[o + 3] = 255;
+              }
+            }
+            ctx.putImageData(imageData, 0, 0);
+          } else {
+            // No transparent backdrop — leave pixels as-is, ensure opaque PNG
+            for (i = 0; i < total; i++) {
+              d[i * 4 + 3] = 255;
+            }
+            ctx.putImageData(imageData, 0, 0);
+          }
+          canvasToPngBlob(canvas).then(resolve, reject);
+        } catch (err) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (e2) {}
+          reject(err);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not load image."));
+      };
+      img.src = url;
+    });
+  }
+
+  function canvasToPngBlob(canvas) {
+    return new Promise(function (resolve, reject) {
+      if (canvas.toBlob) {
+        canvas.toBlob(
+          function (out) {
+            if (out) resolve(out);
+            else reject(new Error("Could not export PNG."));
+          },
+          "image/png"
+        );
+      } else {
+        try {
+          var dataUrl = canvas.toDataURL("image/png");
+          var bin = atob(dataUrl.split(",")[1]);
+          var arr = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          resolve(new Blob([arr], { type: "image/png" }));
+        } catch (e) {
+          reject(e);
+        }
+      }
+    });
+  }
+
+  function loadImageFromBlob(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not load image for resize."));
+      };
+      img.src = url;
+    });
+  }
+
+  /**
+   * If blob is over maxBytes, scale dimensions down until PNG is ≤ maxBytes.
+   * Leaves smaller files unchanged.
+   */
+  async function shrinkPngToMaxBytes(blob, maxBytes) {
+    if (!blob || blob.size <= maxBytes) return blob;
+
+    var img = await loadImageFromBlob(blob);
+    var srcW = img.naturalWidth || img.width;
+    var srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return blob;
+
+    var lo = 0.15;
+    var hi = 1;
+    var best = null;
+    var attempt;
+
+    // Binary search scale factor (PNG size mainly tracks pixel count)
+    for (attempt = 0; attempt < 12; attempt++) {
+      var scale = (lo + hi) / 2;
+      var w = Math.max(1, Math.round(srcW * scale));
+      var h = Math.max(1, Math.round(srcH * scale));
+      var canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      var ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, w, h);
+      var candidate = await canvasToPngBlob(canvas);
+      if (candidate.size <= maxBytes) {
+        best = candidate;
+        lo = scale; // try larger (better quality) while staying under cap
+      } else {
+        hi = scale;
+      }
+    }
+
+    if (best) return best;
+
+    // Last resort: very small scale
+    var w2 = Math.max(1, Math.round(srcW * 0.12));
+    var h2 = Math.max(1, Math.round(srcH * 0.12));
+    var c2 = document.createElement("canvas");
+    c2.width = w2;
+    c2.height = h2;
+    var ctx2 = c2.getContext("2d");
+    ctx2.fillStyle = "#ffffff";
+    ctx2.fillRect(0, 0, w2, h2);
+    ctx2.drawImage(img, 0, 0, w2, h2);
+    return canvasToPngBlob(c2);
+  }
+
+  async function runWhitebgConvert() {
+    if (!whitebgSourceBlob || whitebgBusy) return;
+    whitebgBusy = true;
+    if (whitebgDownload) whitebgDownload.disabled = true;
+    try {
+      var out = await convertToWhiteBackground(whitebgSourceBlob);
+      if (out.size > WHITEBG_MAX_BYTES) {
+        out = await shrinkPngToMaxBytes(out, WHITEBG_MAX_BYTES);
+      }
+      whitebgResultBlob = out;
+      revokeImgUrl(whitebgResult);
+      if (whitebgResult) whitebgResult.src = URL.createObjectURL(out);
+      if (whitebgPreviews) whitebgPreviews.hidden = false;
+      if (whitebgActions) whitebgActions.hidden = false;
+      if (whitebgDownload) whitebgDownload.disabled = false;
+      showWhitebgStatus("");
+    } catch (e) {
+      console.error(e);
+      showWhitebgStatus("Error: " + (e.message || e), "err");
+    }
+    whitebgBusy = false;
+  }
+
+  function getCropDisplayMetrics() {
+    if (!whitebgCropImg || !whitebgCrop) return null;
+    var rect = whitebgCropImg.getBoundingClientRect();
+    var natW = whitebgCrop.imgW;
+    var natH = whitebgCrop.imgH;
+    if (!rect.width || !rect.height || !natW || !natH) return null;
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      scaleX: rect.width / natW,
+      scaleY: rect.height / natH,
+    };
+  }
+
+  function layoutWhitebgCropBox() {
+    if (!whitebgCropBox || !whitebgCrop) return;
+    var m = getCropDisplayMetrics();
+    if (!m) return;
+    whitebgCropBox.style.left = whitebgCrop.x * m.scaleX + "px";
+    whitebgCropBox.style.top = whitebgCrop.y * m.scaleY + "px";
+    whitebgCropBox.style.width = whitebgCrop.w * m.scaleX + "px";
+    whitebgCropBox.style.height = whitebgCrop.h * m.scaleY + "px";
+  }
+
+  function clampWhitebgCrop() {
+    if (!whitebgCrop) return;
+    var minSize = 20;
+    var imgW = whitebgCrop.imgW;
+    var imgH = whitebgCrop.imgH;
+    whitebgCrop.w = Math.max(minSize, Math.min(whitebgCrop.w, imgW));
+    whitebgCrop.h = Math.max(minSize, Math.min(whitebgCrop.h, imgH));
+    whitebgCrop.x = Math.max(0, Math.min(whitebgCrop.x, imgW - whitebgCrop.w));
+    whitebgCrop.y = Math.max(0, Math.min(whitebgCrop.y, imgH - whitebgCrop.h));
+  }
+
+  function openWhitebgCropMode() {
+    if (!whitebgSourceBlob || !whitebgCropImg || !whitebgCropStage) return;
+    exitWhitebgCropMode();
+    if (whitebgPreviews) whitebgPreviews.hidden = true;
+    if (whitebgActions) whitebgActions.hidden = true;
+    whitebgCropStage.hidden = false;
+
+    revokeImgUrl(whitebgCropImg);
+    var url = URL.createObjectURL(whitebgSourceBlob);
+    whitebgCropImg.onload = function () {
+      var imgW = whitebgCropImg.naturalWidth || whitebgCropImg.width;
+      var imgH = whitebgCropImg.naturalHeight || whitebgCropImg.height;
+      // Default selection: centered 80% box
+      var w = Math.round(imgW * 0.8);
+      var h = Math.round(imgH * 0.8);
+      whitebgCrop = {
+        x: Math.round((imgW - w) / 2),
+        y: Math.round((imgH - h) / 2),
+        w: w,
+        h: h,
+        imgW: imgW,
+        imgH: imgH,
+      };
+      // next frame after layout
+      requestAnimationFrame(function () {
+        layoutWhitebgCropBox();
+      });
+    };
+    whitebgCropImg.src = url;
+  }
+
+  async function applyWhitebgCrop() {
+    if (!whitebgSourceBlob || !whitebgCrop) return;
+    try {
+      var img = await loadImageFromBlob(whitebgSourceBlob);
+      var sx = Math.round(whitebgCrop.x);
+      var sy = Math.round(whitebgCrop.y);
+      var sw = Math.round(whitebgCrop.w);
+      var sh = Math.round(whitebgCrop.h);
+      sx = Math.max(0, Math.min(sx, (img.naturalWidth || img.width) - 1));
+      sy = Math.max(0, Math.min(sy, (img.naturalHeight || img.height) - 1));
+      sw = Math.max(1, Math.min(sw, (img.naturalWidth || img.width) - sx));
+      sh = Math.max(1, Math.min(sh, (img.naturalHeight || img.height) - sy));
+
+      var canvas = document.createElement("canvas");
+      canvas.width = sw;
+      canvas.height = sh;
+      var ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, sw, sh);
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      var cropped = await canvasToPngBlob(canvas);
+      exitWhitebgCropMode();
+      // Treat cropped image as new source
+      whitebgSourceBlob = cropped;
+      whitebgResultBlob = null;
+      revokeImgUrl(whitebgOrig);
+      if (whitebgOrig) whitebgOrig.src = URL.createObjectURL(cropped);
+      if (whitebgLabel) whitebgLabel.textContent = whitebgSourceName + " (clipped)";
+      await runWhitebgConvert();
+    } catch (e) {
+      console.error(e);
+      showWhitebgStatus("Clip error: " + (e.message || e), "err");
+    }
+  }
+
+  function whitebgPointerPos(e) {
+    if (e.touches && e.touches.length) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    if (e.changedTouches && e.changedTouches.length) {
+      return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function startWhitebgCropDrag(e, handle) {
+    if (!whitebgCrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var pos = whitebgPointerPos(e);
+    whitebgCropDrag = {
+      handle: handle || "move",
+      startX: pos.x,
+      startY: pos.y,
+      orig: {
+        x: whitebgCrop.x,
+        y: whitebgCrop.y,
+        w: whitebgCrop.w,
+        h: whitebgCrop.h,
+      },
+    };
+  }
+
+  function moveWhitebgCropDrag(e) {
+    if (!whitebgCropDrag || !whitebgCrop) return;
+    e.preventDefault();
+    var m = getCropDisplayMetrics();
+    if (!m) return;
+    var pos = whitebgPointerPos(e);
+    var dx = (pos.x - whitebgCropDrag.startX) / m.scaleX;
+    var dy = (pos.y - whitebgCropDrag.startY) / m.scaleY;
+    var o = whitebgCropDrag.orig;
+    var h = whitebgCropDrag.handle;
+    var minSize = 20;
+
+    var x = o.x;
+    var y = o.y;
+    var w = o.w;
+    var hh = o.h;
+
+    if (h === "move") {
+      x = o.x + dx;
+      y = o.y + dy;
+    } else {
+      if (h.indexOf("e") >= 0) w = o.w + dx;
+      if (h.indexOf("s") >= 0) hh = o.h + dy;
+      if (h.indexOf("w") >= 0) {
+        x = o.x + dx;
+        w = o.w - dx;
+      }
+      if (h.indexOf("n") >= 0) {
+        y = o.y + dy;
+        hh = o.h - dy;
+      }
+    }
+
+    // Normalize negative sizes
+    if (w < minSize) {
+      if (h.indexOf("w") >= 0) x = o.x + o.w - minSize;
+      w = minSize;
+    }
+    if (hh < minSize) {
+      if (h.indexOf("n") >= 0) y = o.y + o.h - minSize;
+      hh = minSize;
+    }
+
+    whitebgCrop.x = x;
+    whitebgCrop.y = y;
+    whitebgCrop.w = w;
+    whitebgCrop.h = hh;
+    clampWhitebgCrop();
+    layoutWhitebgCropBox();
+  }
+
+  function endWhitebgCropDrag() {
+    whitebgCropDrag = null;
+  }
+
+  async function loadWhitebgBlob(blob, name) {
+    if (!blob) return;
+    var type = (blob.type || "").toLowerCase();
+    var nm = name || blob.name || "image.png";
+    if (type && type.indexOf("image/") !== 0 && type !== "application/octet-stream") {
+      showWhitebgStatus("Use a PNG or image file.", "err");
+      return;
+    }
+    exitWhitebgCropMode();
+    whitebgSourceBlob = blob;
+    whitebgSourceName = nm;
+    whitebgResultBlob = null;
+    whitebgCrop = null;
+    if (whitebgDropTitle) whitebgDropTitle.textContent = "Add PNG";
+    if (whitebgLabel) whitebgLabel.textContent = nm;
+    if (whitebgDownload) whitebgDownload.disabled = true;
+    revokeImgUrl(whitebgOrig);
+    revokeImgUrl(whitebgResult);
+    if (whitebgOrig) whitebgOrig.src = URL.createObjectURL(blob);
+    if (whitebgResult) whitebgResult.removeAttribute("src");
+    if (whitebgPreviews) whitebgPreviews.hidden = false;
+    if (whitebgActions) whitebgActions.hidden = false;
+    showWhitebgStatus("");
+    await runWhitebgConvert();
+  }
+
+  function handleWhitebgPasteEvent(e) {
+    if (!isWhitebgPanelActive()) return false;
+    // Don't steal paste while typing isn't relevant; always ok on this panel
+    var blob = imageBlobFromClipboardData(
+      e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData)
+    );
+    if (blob) {
+      e.preventDefault();
+      e.stopPropagation();
+      loadWhitebgBlob(blob, "pasted.png");
+      return true;
+    }
+    return false;
+  }
+
+  // One dotted box: click/tap to upload, drag-drop, focus + Ctrl+V / paste
+  if (whitebgDrop && whitebgFile) {
+    wireDrop(whitebgDrop, whitebgFile, function (files) {
+      var f = files && files[0];
+      if (f) loadWhitebgBlob(f, f.name);
+    });
+  }
+
+  if (whitebgClip) {
+    whitebgClip.addEventListener("click", function () {
+      if (!whitebgSourceBlob) return;
+      openWhitebgCropMode();
+    });
+  }
+  if (whitebgCropApply) {
+    whitebgCropApply.addEventListener("click", function () {
+      applyWhitebgCrop();
+    });
+  }
+  if (whitebgCropCancel) {
+    whitebgCropCancel.addEventListener("click", function () {
+      exitWhitebgCropMode();
+      if (whitebgSourceBlob) {
+        if (whitebgPreviews) whitebgPreviews.hidden = false;
+        if (whitebgActions) whitebgActions.hidden = false;
+      }
+    });
+  }
+
+  // Crop drag (mouse + touch)
+  if (whitebgCropBox) {
+    whitebgCropBox.addEventListener("mousedown", function (e) {
+      if (e.target && e.target.getAttribute("data-handle")) return;
+      startWhitebgCropDrag(e, "move");
+    });
+    whitebgCropBox.addEventListener(
+      "touchstart",
+      function (e) {
+        if (e.target && e.target.getAttribute("data-handle")) return;
+        startWhitebgCropDrag(e, "move");
+      },
+      { passive: false }
+    );
+  }
+  if (whitebgCropStage) {
+    whitebgCropStage.querySelectorAll(".whitebg-handle").forEach(function (handle) {
+      var kind = handle.getAttribute("data-handle");
+      handle.addEventListener("mousedown", function (e) {
+        startWhitebgCropDrag(e, kind);
+      });
+      handle.addEventListener(
+        "touchstart",
+        function (e) {
+          startWhitebgCropDrag(e, kind);
+        },
+        { passive: false }
+      );
+    });
+  }
+  window.addEventListener("mousemove", moveWhitebgCropDrag);
+  window.addEventListener("mouseup", endWhitebgCropDrag);
+  window.addEventListener(
+    "touchmove",
+    function (e) {
+      if (whitebgCropDrag) moveWhitebgCropDrag(e);
+    },
+    { passive: false }
+  );
+  window.addEventListener("touchend", endWhitebgCropDrag);
+  window.addEventListener("touchcancel", endWhitebgCropDrag);
+  window.addEventListener("resize", function () {
+    if (whitebgCropStage && !whitebgCropStage.hidden) layoutWhitebgCropBox();
+  });
+
+  if (whitebgDownload) {
+    whitebgDownload.addEventListener("click", function () {
+      if (!whitebgResultBlob) return;
+      downloadBlob(whitebgResultBlob, whitebgOutName(whitebgSourceName));
+    });
+  }
+  if (whitebgClear) {
+    whitebgClear.addEventListener("click", clearWhitebg);
+  }
+
+  if (whitebgPanel) {
+    ["dragenter", "dragover"].forEach(function (ev) {
+      whitebgPanel.addEventListener(ev, function (e) {
+        if (!isWhitebgPanelActive()) return;
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+    whitebgPanel.addEventListener("drop", function (e) {
+      if (!isWhitebgPanelActive()) return;
+      // Don't steal drops while cropping
+      if (whitebgCropStage && !whitebgCropStage.hidden) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var blob = imageBlobFromClipboardData(e.dataTransfer);
+      if (blob) {
+        loadWhitebgBlob(
+          blob,
+          blob.name && blob.name !== "blob" ? blob.name : "dropped.png"
+        );
+      } else if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        loadWhitebgBlob(e.dataTransfer.files[0], e.dataTransfer.files[0].name);
+      }
     });
   }
 
