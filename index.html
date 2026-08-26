@@ -134,6 +134,13 @@
       min-height: 48px;
     }
     .btn-sentences:active { background: #553c9a; }
+    .btn-extract {
+      flex: 1;
+      background: #0d9488;
+      color: #fff;
+      min-height: 48px;
+    }
+    .btn-extract:active { background: #0f766e; }
     .btn-snippet-edit {
       flex: 0 0 44px;
       width: 44px;
@@ -349,6 +356,10 @@
       <button type="button" class="btn btn-sentences" id="btnSentencesCopy">Create Sentences</button>
       <button type="button" class="btn btn-snippet-edit" id="btnSentencesEdit" title="Edit Create Sentences text" aria-label="Edit Create Sentences text">✏️</button>
     </div>
+    <div class="feedback-row">
+      <button type="button" class="btn btn-extract" id="btnExtractCopy">Extract Text</button>
+      <button type="button" class="btn btn-snippet-edit" id="btnExtractEdit" title="Edit Extract Text text" aria-label="Edit Extract Text text">✏️</button>
+    </div>
 
     <div class="file-input-wrap">
       <input
@@ -425,6 +436,13 @@
             "view (n.) — what you can see from a place or perspective\n" +
             "Lyle booked early to get a seat with a good view of the stage.",
         },
+        extract: {
+          key: "amc_extract_text_v1",
+          label: "Extract Text",
+          title: "Edit Extract Text text",
+          defaultText:
+            "Extract the text from these PDFs for my ESL class. Make sure not to skip any questions; keep the information in the same order.  I don't need tables for the grammar; present it in any other way.\n\nDon't include this part \n\nSaving Lessons 儲存教材 • 教室將在50分時自動關閉 The classroom will end at the 50-minute mark. • 請教師協助下載課程筆記，並上傳至教師前台供學員下載 Tutors, please remember to save the class notes after each class and upload them to the system afterwards.\n\nInternet connection 網路設備 • 請學員自行評估網路連線品質是否可以使用手機或平板上課。 若因網路不穩定而導致課程無法正常進行，則不予退還點數。 Students, please ensure your Internet connection is fast and stable enough to take classes on mobile devices. Credits will not be returned due to unstable connections.\n\nMaterial download guide for tutors. • 請點擊右上方「註釋」，左側會出現工具列，倒數第三個按鍵就是存檔鍵，點擊後即可保存課程教材。 • Please click “Annotate” to enable the toolbar on the left. Then click the “Save” button to download the note.\n\nThank you for your attention. Before the Classroom Closes Remember to Save Your File",
+        },
         shortcuts: {
           key: "amc_keyboard_shortcuts_v1",
           label: "Keyboard shortcut",
@@ -451,6 +469,8 @@
       var btnFeedbackEdit = document.getElementById("btnFeedbackEdit");
       var btnSentencesCopy = document.getElementById("btnSentencesCopy");
       var btnSentencesEdit = document.getElementById("btnSentencesEdit");
+      var btnExtractCopy = document.getElementById("btnExtractCopy");
+      var btnExtractEdit = document.getElementById("btnExtractEdit");
       var snippetModal = document.getElementById("snippetModal");
       var snippetModalTitle = document.getElementById("snippetModalTitle");
       var snippetEditText = document.getElementById("snippetEditText");
@@ -571,6 +591,16 @@
           openSnippetEditor("sentences");
         });
       }
+      if (btnExtractCopy) {
+        btnExtractCopy.addEventListener("click", function () {
+          copySnippet("extract");
+        });
+      }
+      if (btnExtractEdit) {
+        btnExtractEdit.addEventListener("click", function () {
+          openSnippetEditor("extract");
+        });
+      }
       if (snippetEditCancel) {
         snippetEditCancel.addEventListener("click", closeSnippetEditor);
       }
@@ -607,7 +637,7 @@
           "<li>Open the downloaded <code>*_notes.pptx</code> in PowerPoint and use <em>View → Notes</em>.</li>" +
           "</ul>" +
           "<p><strong>Keyboard shortcut</strong> opens a list of useful Windows shortcuts (same preview window as ✏️ edit).</p>" +
-          "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
+          "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> / <strong>Extract Text</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
           "<p><strong>AMC Teacher Login</strong> opens your teacher login page.</p>" +
           "<p><strong>YouTube Channel</strong> (red) opens your YouTube Studio / channel page.</p>",
         studio:
