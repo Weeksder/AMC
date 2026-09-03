@@ -282,7 +282,7 @@
   <script src="jszip.min.js?v=20260721a"></script>
   <script src="blank-target-data.js?v=20260721a"></script>
   <script src="pptx-loader.js?v=20260721a"></script>
-  <script src="amc-tools.js?v=20260809-whitebg-v4"></script>
+  <script src="amc-tools.js?v=20260903-strip-zip"></script>
   <script>
     (function () {
       var HELP = {
@@ -305,7 +305,8 @@
             "<ul>" +
             "<li>Drops picture shapes, background images, and picture-fills.</li>" +
             "<li>Dark/colored slide backgrounds become white.</li>" +
-            "<li>Downloads <code>*_stripped.pptx</code> for each file.</li>" +
+            "<li>One file downloads as <code>*_stripped.pptx</code>.</li>" +
+            "<li>Multiple files download as one <code>stripped_pptx.zip</code> (no per-file prompts).</li>" +
             "</ul>",
         },
         special: {

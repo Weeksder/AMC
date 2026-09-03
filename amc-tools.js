@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-08-09-whitebg-v4";
+  var TOOL_VERSION = "2026-09-03-strip-batch-zip";
   var WHITEBG_MAX_BYTES = 500 * 1024; // 500 KB
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
@@ -2778,26 +2778,109 @@
     });
   }
 
+  /** Keep zip entry names unique when two inputs share a filename. */
+  function uniqueZipEntryName(used, name) {
+    var candidate = name || "file.pptx";
+    if (!used[candidate]) {
+      used[candidate] = true;
+      return candidate;
+    }
+    var m = /^(.*?)(\.[^.]+)?$/.exec(candidate);
+    var base = (m && m[1]) || candidate;
+    var ext = (m && m[2]) || "";
+    var n = 2;
+    do {
+      candidate = base + "_" + n + ext;
+      n++;
+    } while (used[candidate]);
+    used[candidate] = true;
+    return candidate;
+  }
+
   $("stripGo").addEventListener("click", async function () {
     if (!stripFiles.length) {
       setStatus($("stripStatus"), "Add at least one PPTX.", "err");
       return;
     }
     $("stripGo").disabled = true;
-    var ok = 0;
-    for (var i = 0; i < stripFiles.length; i++) {
-      var f = stripFiles[i];
-      setStatus($("stripStatus"), "Processing " + f.name + "…");
-      try {
-        var blob = await stripImagesFromFile(f);
-        downloadBlob(blob, f.name.replace(/\.pptx$/i, "") + "_stripped.pptx");
-        ok++;
-      } catch (e) {
-        console.error(e);
+    var batch = stripFiles.length > 1;
+    var results = [];
+    var failed = [];
+    try {
+      for (var i = 0; i < stripFiles.length; i++) {
+        var f = stripFiles[i];
+        setStatus(
+          $("stripStatus"),
+          "Processing " + (i + 1) + "/" + stripFiles.length + " — " + f.name + "…"
+        );
+        await yieldToUI();
+        try {
+          var blob = await stripImagesFromFile(f);
+          results.push({
+            name: f.name.replace(/\.pptx$/i, "") + "_stripped.pptx",
+            blob: blob,
+          });
+        } catch (e) {
+          console.error(e);
+          failed.push(f.name);
+        }
       }
+
+      if (!results.length) {
+        setStatus(
+          $("stripStatus"),
+          "Could not strip any files" +
+            (failed.length ? " (" + failed.join(", ") + ")" : "") +
+            ".",
+          "err"
+        );
+        return;
+      }
+
+      var failNote = failed.length ? ". Failed: " + failed.join(", ") : "";
+      var failKind = failed.length ? "err" : "ok";
+
+      if (!batch) {
+        downloadBlob(results[0].blob, results[0].name);
+        setStatus(
+          $("stripStatus"),
+          "Done — downloaded " + results[0].name + failNote,
+          failKind
+        );
+        return;
+      }
+
+      setStatus(
+        $("stripStatus"),
+        "Packing " + results.length + " file(s) into zip…"
+      );
+      await yieldToUI();
+      var pack = new JSZip();
+      var used = {};
+      for (var j = 0; j < results.length; j++) {
+        pack.file(uniqueZipEntryName(used, results[j].name), results[j].blob);
+      }
+      var zipBlob = await pack.generateAsync({
+        type: "blob",
+        mimeType: "application/zip",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
+      });
+      downloadBlob(zipBlob, "stripped_pptx.zip");
+      setStatus(
+        $("stripStatus"),
+        "Done — " +
+          results.length +
+          " file(s) in stripped_pptx.zip" +
+          failNote,
+        failKind
+      );
+    } catch (e) {
+      console.error(e);
+      setStatus($("stripStatus"), "Strip failed: " + (e.message || e), "err");
+    } finally {
+      $("stripGo").disabled = false;
     }
-    setStatus($("stripStatus"), "Done — " + ok + " file(s) downloaded.", "ok");
-    $("stripGo").disabled = false;
   });
 
   // ---- Special strip ----
