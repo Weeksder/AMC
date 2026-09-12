@@ -80,6 +80,7 @@ Upload **all** of these files to GitHub Pages (including **`blank-target.pptx`**
 - Image Stripper
 - PNG White BG (transparent PNG → solid white background)
 - Special Strip
+- Rename _EDIT (download copies as `*_EDIT.pptx`)
 - Text Formatter
 
 ## Apple devices

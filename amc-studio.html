@@ -101,6 +101,7 @@
     <button type="button" class="tab active" data-tab="merge">PPTX Slide Extractor</button>
     <button type="button" class="tab" data-tab="strip">Image Stripper</button>
     <button type="button" class="tab" data-tab="special">Special Strip</button>
+    <button type="button" class="tab" data-tab="editname">Rename _EDIT</button>
     <button type="button" class="tab" data-tab="fmt">Text Formatter</button>
     <button type="button" class="tab" data-tab="ocr">Text Extractor</button>
     <button type="button" class="tab" data-tab="whitebg">PNG White BG</button>
@@ -175,6 +176,25 @@
         <button type="button" class="btn danger" id="specialGo">Complete Strip Now</button>
       </div>
       <p class="status" id="specialStatus"></p>
+    </section>
+
+    <section class="panel" id="panel-editname">
+      <div class="panel-head">
+        <h2>Rename PowerPoint (_EDIT)</h2>
+        <button type="button" class="help-btn" data-help="editname" title="Help" aria-label="Help">?</button>
+      </div>
+      <p class="hint">Drop one or more <code>.pptx</code> files. Each is saved as <code>OriginalName_EDIT.pptx</code> — <code>_EDIT</code> is always at the very end, just before the extension. Files that already end with <code>_EDIT.pptx</code> are skipped.</p>
+      <div class="drop" id="editnameDrop">
+        <strong>Drop one or more PPTX files</strong>
+        <span>or click to browse</span>
+        <input type="file" id="editnameFiles" accept=".pptx" multiple hidden>
+      </div>
+      <ul class="file-list" id="editnameList"></ul>
+      <div class="row">
+        <button type="button" class="btn" id="editnameClear">Clear list</button>
+        <button type="button" class="btn primary" id="editnameGo">Rename &amp; Download</button>
+      </div>
+      <p class="status" id="editnameStatus"></p>
     </section>
 
     <section class="panel" id="panel-fmt">
@@ -282,7 +302,7 @@
   <script src="jszip.min.js?v=20260721a"></script>
   <script src="blank-target-data.js?v=20260721a"></script>
   <script src="pptx-loader.js?v=20260721a"></script>
-  <script src="amc-tools.js?v=20260903-strip-zip"></script>
+  <script src="amc-tools.js?v=20260912-editname"></script>
   <script>
     (function () {
       var HELP = {
@@ -305,8 +325,7 @@
             "<ul>" +
             "<li>Drops picture shapes, background images, and picture-fills.</li>" +
             "<li>Dark/colored slide backgrounds become white.</li>" +
-            "<li>One file downloads as <code>*_stripped.pptx</code>.</li>" +
-            "<li>Multiple files download as one <code>stripped_pptx.zip</code> (no per-file prompts).</li>" +
+            "<li>Downloads <code>*_stripped.pptx</code> for each file.</li>" +
             "</ul>",
         },
         special: {
@@ -317,6 +336,19 @@
             "<li>Aggressive strip of content/images for hard-to-clean files.</li>" +
             "<li>Downloads <code>*_COMPLETE_STRIP.pptx</code>.</li>" +
             "<li>Use when Image Stripper is not enough.</li>" +
+            "</ul>",
+        },
+        editname: {
+          title: "Help — Rename _EDIT",
+          body:
+            "<p>Adds <code>_EDIT</code> at the <strong>very end</strong> of each PowerPoint filename (right before <code>.pptx</code>).</p>" +
+            "<ul>" +
+            "<li>Drop or pick one or more <code>.pptx</code> files.</li>" +
+            "<li><code>Lesson_P.pptx</code> becomes <code>Lesson_P_EDIT.pptx</code>.</li>" +
+            "<li>Messy names like <code>Lesson__EDIT_.pptx</code> are cleaned to <code>Lesson_EDIT.pptx</code>.</li>" +
+            "<li>Files that already end with <code>_EDIT.pptx</code> are skipped.</li>" +
+            "<li>One file downloads as a PowerPoint. Several files download as one zip.</li>" +
+            "<li>The original file on disk is not changed — you get a renamed copy.</li>" +
             "</ul>",
         },
         fmt: {

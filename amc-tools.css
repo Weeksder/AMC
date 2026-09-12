@@ -143,6 +143,7 @@ textarea, .fmt-out {
   font-size: 0.9rem;
 }
 .file-list li:last-child { border-bottom: none; }
+.file-list li.rename-skip { color: var(--muted); }
 
 /* PNG White Background tool */
 .whitebg-drop {

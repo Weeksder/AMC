@@ -4,7 +4,7 @@
 
   // Bump this whenever you re-upload amc-tools.js. If Chrome and Edge show
   // different version strings, one browser is still using a cached script.
-  var TOOL_VERSION = "2026-09-03-strip-batch-zip";
+  var TOOL_VERSION = "2026-09-12-editname";
   var WHITEBG_MAX_BYTES = 500 * 1024; // 500 KB
   try {
     console.log("[AMC Studio] script version", TOOL_VERSION);
@@ -2778,109 +2778,26 @@
     });
   }
 
-  /** Keep zip entry names unique when two inputs share a filename. */
-  function uniqueZipEntryName(used, name) {
-    var candidate = name || "file.pptx";
-    if (!used[candidate]) {
-      used[candidate] = true;
-      return candidate;
-    }
-    var m = /^(.*?)(\.[^.]+)?$/.exec(candidate);
-    var base = (m && m[1]) || candidate;
-    var ext = (m && m[2]) || "";
-    var n = 2;
-    do {
-      candidate = base + "_" + n + ext;
-      n++;
-    } while (used[candidate]);
-    used[candidate] = true;
-    return candidate;
-  }
-
   $("stripGo").addEventListener("click", async function () {
     if (!stripFiles.length) {
       setStatus($("stripStatus"), "Add at least one PPTX.", "err");
       return;
     }
     $("stripGo").disabled = true;
-    var batch = stripFiles.length > 1;
-    var results = [];
-    var failed = [];
-    try {
-      for (var i = 0; i < stripFiles.length; i++) {
-        var f = stripFiles[i];
-        setStatus(
-          $("stripStatus"),
-          "Processing " + (i + 1) + "/" + stripFiles.length + " — " + f.name + "…"
-        );
-        await yieldToUI();
-        try {
-          var blob = await stripImagesFromFile(f);
-          results.push({
-            name: f.name.replace(/\.pptx$/i, "") + "_stripped.pptx",
-            blob: blob,
-          });
-        } catch (e) {
-          console.error(e);
-          failed.push(f.name);
-        }
+    var ok = 0;
+    for (var i = 0; i < stripFiles.length; i++) {
+      var f = stripFiles[i];
+      setStatus($("stripStatus"), "Processing " + f.name + "…");
+      try {
+        var blob = await stripImagesFromFile(f);
+        downloadBlob(blob, f.name.replace(/\.pptx$/i, "") + "_stripped.pptx");
+        ok++;
+      } catch (e) {
+        console.error(e);
       }
-
-      if (!results.length) {
-        setStatus(
-          $("stripStatus"),
-          "Could not strip any files" +
-            (failed.length ? " (" + failed.join(", ") + ")" : "") +
-            ".",
-          "err"
-        );
-        return;
-      }
-
-      var failNote = failed.length ? ". Failed: " + failed.join(", ") : "";
-      var failKind = failed.length ? "err" : "ok";
-
-      if (!batch) {
-        downloadBlob(results[0].blob, results[0].name);
-        setStatus(
-          $("stripStatus"),
-          "Done — downloaded " + results[0].name + failNote,
-          failKind
-        );
-        return;
-      }
-
-      setStatus(
-        $("stripStatus"),
-        "Packing " + results.length + " file(s) into zip…"
-      );
-      await yieldToUI();
-      var pack = new JSZip();
-      var used = {};
-      for (var j = 0; j < results.length; j++) {
-        pack.file(uniqueZipEntryName(used, results[j].name), results[j].blob);
-      }
-      var zipBlob = await pack.generateAsync({
-        type: "blob",
-        mimeType: "application/zip",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 },
-      });
-      downloadBlob(zipBlob, "stripped_pptx.zip");
-      setStatus(
-        $("stripStatus"),
-        "Done — " +
-          results.length +
-          " file(s) in stripped_pptx.zip" +
-          failNote,
-        failKind
-      );
-    } catch (e) {
-      console.error(e);
-      setStatus($("stripStatus"), "Strip failed: " + (e.message || e), "err");
-    } finally {
-      $("stripGo").disabled = false;
     }
+    setStatus($("stripStatus"), "Done — " + ok + " file(s) downloaded.", "ok");
+    $("stripGo").disabled = false;
   });
 
   // ---- Special strip ----
@@ -2979,6 +2896,184 @@
     setStatus($("specialStatus"), "Done — " + ok + " file(s) downloaded.", "ok");
     $("specialGo").disabled = false;
   });
+
+  // ---- Rename _EDIT (filename only; file bytes unchanged) ----
+  var editnameFiles = [];
+
+  /** True when the name already ends with _EDIT.pptx */
+  function pptxAlreadyEditNamed(name) {
+    return /_EDIT\.pptx$/i.test(name || "");
+  }
+
+  /**
+   * Put _EDIT at the very end of the stem, just before .pptx.
+   * Cleans leftover _EDIT / trailing underscores (e.g. foo__EDIT_.pptx → foo_EDIT.pptx).
+   */
+  function makeRenameEditName(srcName) {
+    var base = String(srcName || "slides").replace(/\.pptx$/i, "");
+    base = base.replace(/_+EDIT_*$/i, "");
+    base = base.replace(/_+$/g, "");
+    if (!base) base = "slides";
+    return base + "_EDIT.pptx";
+  }
+
+  function renderEditnameList() {
+    var ul = $("editnameList");
+    if (!ul) return;
+    ul.innerHTML = "";
+    editnameFiles.forEach(function (f) {
+      var li = document.createElement("li");
+      if (pptxAlreadyEditNamed(f.name)) {
+        li.className = "rename-skip";
+        li.textContent = f.name + "  (already has _EDIT)";
+      } else {
+        li.textContent = f.name + "  →  " + makeRenameEditName(f.name);
+      }
+      ul.appendChild(li);
+    });
+  }
+
+  function addEditnameFiles(files) {
+    var seen = {};
+    editnameFiles.forEach(function (f) {
+      seen[(f.name || "").toLowerCase()] = true;
+    });
+    Array.prototype.forEach.call(files, function (f) {
+      if (!f || !/\.pptx$/i.test(f.name)) return;
+      var key = f.name.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      editnameFiles.push(f);
+    });
+    renderEditnameList();
+    var n = editnameFiles.length;
+    setStatus(
+      $("editnameStatus"),
+      n ? n + " file(s) ready." : "No .pptx files in that drop.",
+      n ? "ok" : "err"
+    );
+  }
+
+  if ($("editnameDrop") && $("editnameFiles")) {
+    wireDrop($("editnameDrop"), $("editnameFiles"), addEditnameFiles);
+  }
+  if ($("editnameClear")) {
+    $("editnameClear").addEventListener("click", function () {
+      editnameFiles = [];
+      renderEditnameList();
+      setStatus($("editnameStatus"), "Cleared.");
+    });
+  }
+  if ($("editnameGo")) {
+    $("editnameGo").addEventListener("click", async function () {
+      if (!editnameFiles.length) {
+        setStatus($("editnameStatus"), "Add at least one PPTX.", "err");
+        return;
+      }
+      var toRename = [];
+      var skipped = 0;
+      editnameFiles.forEach(function (f) {
+        if (pptxAlreadyEditNamed(f.name)) skipped++;
+        else toRename.push(f);
+      });
+      if (!toRename.length) {
+        setStatus(
+          $("editnameStatus"),
+          skipped
+            ? "Nothing to do — every file already ends with _EDIT.pptx."
+            : "Add at least one PPTX.",
+          skipped ? "ok" : "err"
+        );
+        return;
+      }
+
+      $("editnameGo").disabled = true;
+      var ok = 0;
+      var failed = 0;
+      try {
+        if (toRename.length === 1) {
+          var one = toRename[0];
+          var oneOut = makeRenameEditName(one.name);
+          setStatus($("editnameStatus"), "Saving " + oneOut + "…");
+          await yieldToUI();
+          try {
+            var buf = await readFileAsArrayBuffer(one);
+            downloadBlob(
+              new Blob([buf], {
+                type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              }),
+              oneOut
+            );
+            ok = 1;
+          } catch (e) {
+            console.error(e);
+            failed = 1;
+          }
+        } else {
+          if (typeof JSZip === "undefined") {
+            throw new Error("JSZip missing.");
+          }
+          var zip = new JSZip();
+          var usedNames = {};
+          for (var i = 0; i < toRename.length; i++) {
+            var f = toRename[i];
+            var outName = makeRenameEditName(f.name);
+            var unique = outName;
+            var n = 2;
+            while (usedNames[unique.toLowerCase()]) {
+              unique = outName.replace(/\.pptx$/i, "") + "_" + n + ".pptx";
+              n++;
+            }
+            usedNames[unique.toLowerCase()] = true;
+            setStatus(
+              $("editnameStatus"),
+              "Adding " + (i + 1) + "/" + toRename.length + " — " + unique + "…"
+            );
+            await yieldToUI();
+            try {
+              zip.file(unique, await readFileAsArrayBuffer(f));
+              ok++;
+            } catch (e) {
+              console.error(e);
+              failed++;
+            }
+          }
+          if (ok) {
+            setStatus($("editnameStatus"), "Building zip…");
+            await yieldToUI();
+            var zipBlob = await zip.generateAsync({
+              type: "blob",
+              compression: "DEFLATE",
+              compressionOptions: { level: 1 },
+            });
+            downloadBlob(zipBlob, "AMC_EDIT_renamed.zip");
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        setStatus($("editnameStatus"), "Error: " + (e.message || e), "err");
+        $("editnameGo").disabled = false;
+        return;
+      }
+
+      var parts = [];
+      if (ok) {
+        parts.push(
+          ok === 1
+            ? "Downloaded 1 renamed PowerPoint."
+            : "Downloaded " + ok + " renamed files in AMC_EDIT_renamed.zip."
+        );
+      }
+      if (skipped) parts.push("Skipped " + skipped + " already named _EDIT.");
+      if (failed) parts.push("Failed " + failed + ".");
+      setStatus(
+        $("editnameStatus"),
+        parts.join(" ") || "Nothing downloaded.",
+        failed && !ok ? "err" : "ok"
+      );
+      $("editnameGo").disabled = false;
+    });
+  }
 
   // ---- Text formatter ----
   function formatMarkdown(text) {
