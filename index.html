@@ -141,6 +141,13 @@
       min-height: 48px;
     }
     .btn-extract:active { background: #0f766e; }
+    .btn-discussion {
+      flex: 1;
+      background: #c05621;
+      color: #fff;
+      min-height: 48px;
+    }
+    .btn-discussion:active { background: #9c4221; }
     .btn-snippet-edit {
       flex: 0 0 44px;
       width: 44px;
@@ -360,6 +367,10 @@
       <button type="button" class="btn btn-extract" id="btnExtractCopy">Extract Text</button>
       <button type="button" class="btn btn-snippet-edit" id="btnExtractEdit" title="Edit Extract Text text" aria-label="Edit Extract Text text">✏️</button>
     </div>
+    <div class="feedback-row">
+      <button type="button" class="btn btn-discussion" id="btnDiscussionCopy">Discussion Point</button>
+      <button type="button" class="btn btn-snippet-edit" id="btnDiscussionEdit" title="Edit Discussion Point text" aria-label="Edit Discussion Point text">✏️</button>
+    </div>
 
     <div class="file-input-wrap">
       <input
@@ -436,6 +447,15 @@
             "**view** (n.) — what you can see from a place or perspective\n" +
             "Lyle booked early to get a seat with a good view of the stage.",
         },
+        discussion: {
+          key: "amc_discussion_point_v1",
+          label: "Discussion Point",
+          title: "Edit Discussion Point text",
+          defaultText:
+            "I want discussion points organized by headers,\n" +
+            "expand the description list with bullet list, line break after the header and subheaders, bullet list for the details only\n" +
+            "I don't want discussion Questions",
+        },
         extract: {
           key: "amc_extract_text_v1",
           label: "Extract Text",
@@ -471,6 +491,8 @@
       var btnSentencesEdit = document.getElementById("btnSentencesEdit");
       var btnExtractCopy = document.getElementById("btnExtractCopy");
       var btnExtractEdit = document.getElementById("btnExtractEdit");
+      var btnDiscussionCopy = document.getElementById("btnDiscussionCopy");
+      var btnDiscussionEdit = document.getElementById("btnDiscussionEdit");
       var snippetModal = document.getElementById("snippetModal");
       var snippetModalTitle = document.getElementById("snippetModalTitle");
       var snippetEditText = document.getElementById("snippetEditText");
@@ -601,6 +623,16 @@
           openSnippetEditor("extract");
         });
       }
+      if (btnDiscussionCopy) {
+        btnDiscussionCopy.addEventListener("click", function () {
+          copySnippet("discussion");
+        });
+      }
+      if (btnDiscussionEdit) {
+        btnDiscussionEdit.addEventListener("click", function () {
+          openSnippetEditor("discussion");
+        });
+      }
       if (snippetEditCancel) {
         snippetEditCancel.addEventListener("click", closeSnippetEditor);
       }
@@ -637,7 +669,7 @@
           "<li>Open the downloaded <code>*_notes.pptx</code> in PowerPoint and use <em>View → Notes</em>.</li>" +
           "</ul>" +
           "<p><strong>Keyboard shortcut</strong> opens a list of useful Windows shortcuts (same preview window as ✏️ edit).</p>" +
-          "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> / <strong>Extract Text</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
+          "<p><strong>Feedback comment</strong> / <strong>Create Sentences</strong> / <strong>Extract Text</strong> / <strong>Discussion Point</strong> copy ready-made prompts to the clipboard (✏️ to edit).</p>" +
           "<p><strong>AMC Teacher Login</strong> opens your teacher login page.</p>" +
           "<p><strong>YouTube Channel</strong> (red) opens your YouTube Studio / channel page.</p>",
         studio:
