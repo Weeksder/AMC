@@ -163,6 +163,17 @@ html, body {
   user-select: none;
   -webkit-user-drag: none;
 }
+.slide-text-card {
+  max-width: 100%;
+  max-height: 100%;
+  background: #fff;
+  box-shadow: 0 2px 14px rgba(0,0,0,.18);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.slide-text-card .text-slide-inner {
+  transform-origin: top left;
+}
 .slide-chrome {
   position: absolute;
   top: 10px;

@@ -279,126 +279,347 @@
     });
   }
 
-  function placeholderChromeType(el) {
-    var n = el;
-    while (n && n.nodeType === 1) {
-      if (n.localName === "sp" || n.localName === "cxnSp" || n.localName === "pic") {
-        var nodes = n.getElementsByTagName("*");
-        for (var i = 0; i < nodes.length; i++) {
-          if (nodes[i].localName === "ph") {
-            return String(nodes[i].getAttribute("type") || "").toLowerCase();
-          }
-        }
-        return "";
-      }
-      n = n.parentNode;
+  function firstLocal(el, name) {
+    if (!el) return null;
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var ch = el.childNodes[i];
+      if (ch.nodeType === 1 && ch.localName === name) return ch;
     }
-    return "";
+    return null;
   }
 
-  function slideDocToTextLines(slideDoc) {
+  function attrInt(el, name, fallback) {
+    if (!el) return fallback;
+    var v = el.getAttribute(name);
+    if (v == null || v === "") return fallback;
+    var n = parseInt(v, 10);
+    return isNaN(n) ? fallback : n;
+  }
+
+  function ptToEmu(pt) {
+    return pt * 12700;
+  }
+
+  function szToEmu(szHundredths, fallbackPt) {
+    var sz = parseInt(szHundredths, 10);
+    if (!sz || sz <= 0) return ptToEmu(fallbackPt == null ? 18 : fallbackPt);
+    return ptToEmu(sz / 100);
+  }
+
+  function isChromePlaceholderShape(sp) {
+    var phs = xmlLocalAll(sp, "ph");
+    for (var i = 0; i < phs.length; i++) {
+      var type = String(phs[i].getAttribute("type") || "").toLowerCase();
+      if (type === "ftr" || type === "sldnum" || type === "dt" || type === "hdr") return true;
+    }
+    return false;
+  }
+
+  function shapeXfrm(sp) {
+    var spPr = firstLocal(sp, "spPr") || xmlLocalAll(sp, "spPr")[0];
+    var xfrm = spPr ? firstLocal(spPr, "xfrm") || xmlLocalAll(spPr, "xfrm")[0] : null;
+    var off = xfrm ? firstLocal(xfrm, "off") || xmlLocalAll(xfrm, "off")[0] : null;
+    var ext = xfrm ? firstLocal(xfrm, "ext") || xmlLocalAll(xfrm, "ext")[0] : null;
+    return {
+      x: attrInt(off, "x", 0),
+      y: attrInt(off, "y", 0),
+      cx: attrInt(ext, "cx", 0),
+      cy: attrInt(ext, "cy", 0),
+    };
+  }
+
+  function svgToDataUrl(svg) {
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function runFontName(rPr) {
+    if (!rPr) return "Calibri";
+    var latin = xmlLocalAll(rPr, "latin")[0];
+    var face = latin && latin.getAttribute("typeface");
+    if (face && face.charAt(0) !== "+") return face;
+    return "Calibri";
+  }
+
+  function runIsBold(rPr) {
+    if (!rPr) return false;
+    var b = rPr.getAttribute("b");
+    return b === "1" || b === "true";
+  }
+
+  function runFillColor(rPr) {
+    if (!rPr) return "#111111";
+    var srgb = xmlLocalAll(rPr, "srgbClr")[0];
+    if (srgb && srgb.getAttribute("val")) {
+      var hex = String(srgb.getAttribute("val")).replace("#", "");
+      if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+        var r = parseInt(hex.slice(0, 2), 16);
+        var g = parseInt(hex.slice(2, 4), 16);
+        var b = parseInt(hex.slice(4, 6), 16);
+        if (r + g + b >= 720) return "#111111";
+        return "#" + hex;
+      }
+    }
+    return "#111111";
+  }
+
+  function estimateTextWidthEmu(text, fontEmu) {
+    return String(text || "").length * fontEmu * 0.5;
+  }
+
+  function wrapWordsToWidth(text, fontEmu, maxW) {
+    var words = String(text || "").split(/\s+/).filter(Boolean);
+    if (!words.length) return [""];
     var lines = [];
-    xmlLocalAll(slideDoc, "p").forEach(function (p) {
-      var chrome = placeholderChromeType(p);
-      if (chrome === "ftr" || chrome === "sldnum" || chrome === "dt" || chrome === "hdr") {
-        return;
+    var cur = "";
+    words.forEach(function (w) {
+      var next = cur ? cur + " " + w : w;
+      if (cur && estimateTextWidthEmu(next, fontEmu) > maxW) {
+        lines.push(cur);
+        cur = w;
+      } else {
+        cur = next;
       }
-      var chunks = [];
-      Array.prototype.forEach.call(p.childNodes, function (ch) {
-        if (ch.nodeType !== 1) return;
-        if (ch.localName === "br") {
-          chunks.push("\n");
-          return;
-        }
-        if (ch.localName === "r" || ch.localName === "fld") {
-          xmlLocalAll(ch, "t").forEach(function (tEl) {
-            chunks.push(tEl.textContent || "");
-          });
-        }
-      });
-      if (!chunks.length) {
-        xmlLocalAll(p, "t").forEach(function (tEl) {
-          chunks.push(tEl.textContent || "");
-        });
-      }
-      String(chunks.join(""))
-        .split("\n")
-        .forEach(function (line) {
-          var t = String(line).replace(/\s+/g, " ").trim();
-          if (t) lines.push(t);
-        });
     });
+    if (cur) lines.push(cur);
     return lines;
   }
 
-  function wrapSlideTextLines(lines, maxChars) {
-    var out = [];
-    (lines || []).forEach(function (line) {
-      line = String(line || "");
-      if (line.length <= maxChars) {
-        out.push(line);
+  function collectShapeRuns(pEl, fallbackSz) {
+    var runs = [];
+    Array.prototype.forEach.call(pEl.childNodes, function (ch) {
+      if (ch.nodeType !== 1) return;
+      if (ch.localName === "br") {
+        runs.push({ text: "\n", szEmu: fallbackSz, bold: false, font: "Calibri", color: "#111111" });
         return;
       }
-      var words = line.split(/\s+/);
-      var cur = "";
-      words.forEach(function (w) {
-        var next = cur ? cur + " " + w : w;
-        if (next.length > maxChars && cur) {
-          out.push(cur);
-          cur = w;
-        } else {
-          cur = next;
-        }
+      if (ch.localName !== "r" && ch.localName !== "fld") return;
+      var rPr = firstLocal(ch, "rPr");
+      var szEmu = rPr && rPr.getAttribute("sz") ? szToEmu(rPr.getAttribute("sz"), 18) : fallbackSz;
+      var text = "";
+      xmlLocalAll(ch, "t").forEach(function (tEl) {
+        text += tEl.textContent || "";
       });
-      if (cur) out.push(cur);
+      if (!text) return;
+      runs.push({
+        text: text,
+        szEmu: szEmu,
+        bold: runIsBold(rPr),
+        font: runFontName(rPr),
+        color: runFillColor(rPr),
+      });
     });
-    return out;
+    return runs;
   }
 
-  function buildTextSlideDataUrl(lines, slideNum) {
-    var w = 960;
-    var h = 540;
-    var raw = (lines && lines.length ? lines.slice() : []).filter(Boolean);
-    var nHint = raw.length || 1;
-    var fontSize = nHint <= 1 ? 64 : nHint <= 4 ? 40 : nHint <= 8 ? 28 : 22;
-    var maxChars = Math.max(12, Math.floor(w / (fontSize * 0.58)));
-    var texts = wrapSlideTextLines(raw, maxChars);
-    if (!texts.length) texts = [""];
-    if (texts.length > 16) {
-      fontSize = 18;
-      texts = texts.slice(0, 16);
+  function buildTextSlideFromDoc(slideDoc, slideCx, slideCy) {
+    slideCx = slideCx || 12192000;
+    slideCy = slideCy || 6858000;
+    var svgW = 960;
+    var svgH = Math.max(1, Math.round((960 * slideCy) / slideCx));
+    var k = svgW / slideCx;
+    function px(emu) {
+      return emu * k;
     }
-    var lineHeight = fontSize * 1.35;
-    var blockH = texts.length * lineHeight;
-    var startY = Math.max(fontSize + 36, (h - blockH) / 2 + fontSize * 0.85);
-    var tspans = texts
-      .map(function (line, i) {
-        var y = startY + i * lineHeight;
-        return (
-          '<text x="50%" y="' +
-          y +
-          '" text-anchor="middle" fill="#111111" font-size="' +
-          fontSize +
-          '" font-family="Calibri,Segoe UI,Arial,sans-serif" font-weight="600">' +
-          escapeHtmlText(line) +
+    var parts = [];
+    var htmlParts = [];
+    function textEl(x, y, fontPx, anchorSvg, color, bold, content) {
+      var fs = Math.max(12, Math.round(fontPx));
+      var fill = color || "#111111";
+      var weight = bold ? "700" : "400";
+      parts.push(
+        '<text x="' +
+          Math.round(x) +
+          '" y="' +
+          Math.round(y) +
+          '" text-anchor="' +
+          anchorSvg +
+          '" fill="' +
+          fill +
+          '" font-size="' +
+          fs +
+          '" font-family="Calibri, Arial, sans-serif" font-weight="' +
+          weight +
+          '">' +
+          escapeHtmlText(content) +
           "</text>"
+      );
+      var trans =
+        anchorSvg === "middle"
+          ? "translate(-50%,-80%)"
+          : anchorSvg === "end"
+            ? "translate(-100%,-80%)"
+            : "translate(0,-80%)";
+      htmlParts.push(
+        '<div style="position:absolute;left:' +
+          Math.round(x) +
+          "px;top:" +
+          Math.round(y) +
+          "px;font-size:" +
+          fs +
+          "px;line-height:1;color:" +
+          fill +
+          ";font-family:Calibri,Arial,sans-serif;font-weight:" +
+          weight +
+          ";white-space:nowrap;transform:" +
+          trans +
+          '">' +
+          escapeHtmlText(content) +
+          "</div>"
+      );
+    }
+    xmlLocalAll(slideDoc, "sp").forEach(function (sp) {
+      if (isChromePlaceholderShape(sp)) return;
+      var txBody = firstLocal(sp, "txBody") || xmlLocalAll(sp, "txBody")[0];
+      if (!txBody) return;
+      var box = shapeXfrm(sp);
+      if (box.cx <= 0 || box.cy <= 0) return;
+      var bodyPr = firstLocal(txBody, "bodyPr") || xmlLocalAll(txBody, "bodyPr")[0];
+      var lIns = attrInt(bodyPr, "lIns", 91440);
+      var tIns = attrInt(bodyPr, "tIns", 45720);
+      var rIns = attrInt(bodyPr, "rIns", 91440);
+      var bIns = attrInt(bodyPr, "bIns", 45720);
+      var innerW = Math.max(1, box.cx - lIns - rIns);
+      var innerH = Math.max(1, box.cy - tIns - bIns);
+      var anchor = String((bodyPr && bodyPr.getAttribute("anchor")) || "t").toLowerCase();
+      var wrap = String((bodyPr && bodyPr.getAttribute("wrap")) || "square").toLowerCase();
+      var autoFit = !!(bodyPr && xmlLocalAll(bodyPr, "spAutoFit").length);
+
+      var paras = [];
+      xmlLocalAll(txBody, "p").forEach(function (pEl) {
+        var pPr = firstLocal(pEl, "pPr");
+        var algn = String((pPr && pPr.getAttribute("algn")) || "l").toLowerCase();
+        var endPr = firstLocal(pEl, "endParaRPr");
+        var fallbackSz =
+          endPr && endPr.getAttribute("sz") ? szToEmu(endPr.getAttribute("sz"), 18) : ptToEmu(18);
+        var runs = collectShapeRuns(pEl, fallbackSz);
+        var text = runs
+          .map(function (r) {
+            return r.text;
+          })
+          .join("");
+        if (!String(text).replace(/\s+/g, "").length) return;
+        var maxSz = fallbackSz;
+        runs.forEach(function (r) {
+          if (r.szEmu > maxSz) maxSz = r.szEmu;
+        });
+        paras.push({ algn: algn, runs: runs, text: text, maxSz: maxSz });
+      });
+      if (!paras.length) return;
+
+      var fit = 1;
+      if (autoFit) {
+        paras.forEach(function (para) {
+          var w = estimateTextWidthEmu(para.text.replace(/\n/g, ""), para.maxSz);
+          if (w > innerW) fit = Math.min(fit, innerW / w);
+        });
+        var lineCount = 0;
+        paras.forEach(function (para) {
+          lineCount += Math.max(1, para.text.split("\n").length);
+        });
+        var blockH = lineCount * paras[0].maxSz * 1.2 * fit;
+        if (blockH > innerH) fit = Math.min(fit, innerH / (lineCount * paras[0].maxSz * 1.2));
+        if (fit < 0.2) fit = 0.2;
+        if (fit > 1) fit = 1;
+      }
+
+      var laid = [];
+      paras.forEach(function (para) {
+        var fontEmu = para.maxSz * fit;
+        var chunks = para.text.split("\n");
+        chunks.forEach(function (chunk) {
+          var lines =
+            wrap !== "none" ? wrapWordsToWidth(chunk, fontEmu, innerW) : [chunk || ""];
+          lines.forEach(function (line) {
+            if (!String(line).trim()) return;
+            laid.push({
+              text: line,
+              algn: para.algn,
+              fontEmu: fontEmu,
+              bold: !!(para.runs[0] && para.runs[0].bold),
+              color: (para.runs[0] && para.runs[0].color) || "#111111",
+            });
+          });
+        });
+      });
+      if (!laid.length) return;
+
+      var lineH = laid[0].fontEmu * 1.2;
+      var blockH2 = laid.length * lineH;
+      var startY;
+      if (anchor === "ctr") startY = box.y + tIns + (innerH - blockH2) / 2;
+      else if (anchor === "b") startY = box.y + tIns + innerH - blockH2;
+      else startY = box.y + tIns;
+
+      laid.forEach(function (line, i) {
+        var baseline = startY + i * lineH + line.fontEmu * 0.8;
+        var x;
+        var anchorSvg = "start";
+        if (line.algn === "ctr") {
+          x = box.x + lIns + innerW / 2;
+          anchorSvg = "middle";
+        } else if (line.algn === "r") {
+          x = box.x + lIns + innerW;
+          anchorSvg = "end";
+        } else {
+          x = box.x + lIns;
+        }
+        parts.push(
+          textEl(px(x), px(baseline), px(line.fontEmu), anchorSvg, line.color, line.bold, line.text)
         );
-      })
-      .join("");
+      });
+    });
+
+    if (!parts.length) {
+      var lines = [];
+      var maxEmu = ptToEmu(44);
+      xmlLocalAll(slideDoc, "t").forEach(function (tEl) {
+        var t = String(tEl.textContent || "").replace(/\s+/g, " ").trim();
+        if (!t) return;
+        var sp = tEl.parentNode;
+        while (sp && sp.nodeType === 1 && sp.localName !== "sp") sp = sp.parentNode;
+        if (sp && isChromePlaceholderShape(sp)) return;
+        lines.push(t);
+      });
+      xmlLocalAll(slideDoc, "rPr").forEach(function (rPr) {
+        if (rPr.getAttribute("sz")) {
+          var e = szToEmu(rPr.getAttribute("sz"), 18);
+          if (e > maxEmu) maxEmu = e;
+        }
+      });
+      var fontPx = Math.max(28, px(maxEmu));
+      var linePx = fontPx * 1.25;
+      var top = svgH / 2 - ((lines.length - 1) * linePx) / 2 + fontPx * 0.3;
+      lines.forEach(function (line, i) {
+        parts.push(textEl(svgW / 2, top + i * linePx, fontPx, "middle", "#111111", false, line));
+      });
+    }
+
     var svg =
       '<svg xmlns="http://www.w3.org/2000/svg" width="' +
-      w +
+      svgW +
       '" height="' +
-      h +
+      svgH +
       '" viewBox="0 0 ' +
-      w +
+      svgW +
       " " +
-      h +
-      '">' +
+      svgH +
+      '" overflow="visible">' +
       '<rect width="100%" height="100%" fill="#ffffff"/>' +
-      tspans +
+      parts.join("") +
       "</svg>";
-    return "data:image/svg+xml," + encodeURIComponent(svg);
+    var html =
+      '<div class="text-slide-inner" data-w="' +
+      svgW +
+      '" data-h="' +
+      svgH +
+      '" style="width:' +
+      svgW +
+      "px;height:" +
+      svgH +
+      'px;background:#fff;position:relative;overflow:hidden">' +
+      htmlParts.join("") +
+      "</div>";
+    return { img: svgToDataUrl(svg), html: html };
   }
 
   function safeDeckKey(name) {
@@ -454,6 +675,9 @@
 
     var idToTarget = relsMap(await presRelsFile.async("text"));
     var presDoc = new DOMParser().parseFromString(await presFile.async("text"), "application/xml");
+    var sldSzEl = xmlLocalAll(presDoc, "sldSz")[0];
+    var slideCx = attrInt(sldSzEl, "cx", 12192000);
+    var slideCy = attrInt(sldSzEl, "cy", 6858000);
     var R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     var slideTargets = [];
     xmlLocalAll(presDoc, "sldId").forEach(function (el) {
@@ -490,8 +714,11 @@
         imgDataUrl = await blobToDataUrl(new Blob([u8], { type: mime }));
         break;
       }
+      var textHtml = "";
       if (!imgDataUrl) {
-        imgDataUrl = buildTextSlideDataUrl(slideDocToTextLines(slideDoc), i + 1);
+        var textSlide = buildTextSlideFromDoc(slideDoc, slideCx, slideCy);
+        imgDataUrl = textSlide.img;
+        textHtml = textSlide.html || "";
       }
 
       var notesHtml = "";
@@ -511,6 +738,7 @@
       slides.push({
         n: i + 1,
         img: imgDataUrl,
+        textHtml: textHtml,
         notesHtml: notesHtml,
         // Keep exact OOXML so SAVE can write the file back unchanged if not edited
         originalNotesXml: originalNotesXml,

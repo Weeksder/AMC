@@ -17,6 +17,7 @@
   const emptyState = document.getElementById("emptyState");
   const thumbsEl = document.getElementById("thumbs");
   const mainSlide = document.getElementById("mainSlide");
+  const mainSlideText = document.getElementById("mainSlideText");
   const notesBody = document.getElementById("notesBody");
   const pageCurrent = document.getElementById("pageCurrent");
   const pageTotal = document.getElementById("pageTotal");
@@ -190,14 +191,42 @@
     } catch (e) {}
   }
 
+  function fitTextCard() {
+    if (!mainSlideText || mainSlideText.hidden) return;
+    var inner = mainSlideText.querySelector(".text-slide-inner");
+    if (!inner) return;
+    var w = parseInt(inner.getAttribute("data-w"), 10) || 960;
+    var h = parseInt(inner.getAttribute("data-h"), 10) || 540;
+    var wrap = document.querySelector(".slide-wrap");
+    if (!wrap) return;
+    var rect = wrap.getBoundingClientRect();
+    var s = Math.min(rect.width / w, rect.height / h);
+    if (!isFinite(s) || s <= 0) s = 1;
+    inner.style.transform = "scale(" + s + ")";
+    mainSlideText.style.width = w * s + "px";
+    mainSlideText.style.height = h * s + "px";
+  }
+
   function show(i, opts) {
     opts = opts || {};
     if (!SLIDES.length || i < 0 || i >= SLIDES.length) return;
     if (!opts.skipSave && index !== i) saveCurrentNotes();
     index = i;
     const s = SLIDES[i];
-    mainSlide.src = s.img;
     mainSlide.alt = "Slide " + s.n;
+    if (s.textHtml && mainSlideText) {
+      mainSlideText.innerHTML = s.textHtml;
+      mainSlideText.hidden = false;
+      mainSlide.style.display = "none";
+      requestAnimationFrame(fitTextCard);
+    } else {
+      if (mainSlideText) {
+        mainSlideText.hidden = true;
+        mainSlideText.innerHTML = "";
+      }
+      mainSlide.style.display = "";
+      mainSlide.src = s.img;
+    }
     let html = s.notesHtml;
     if (!html || !html.replace(/<[^>]+>/g, "").trim()) html = emptyNotesHtml();
     notesBody.innerHTML = html;
@@ -367,7 +396,10 @@
   }
   splitter.addEventListener("pointerup", endDrag);
   splitter.addEventListener("pointercancel", endDrag);
-  window.addEventListener("resize", applyNotesHeight);
+  window.addEventListener("resize", function () {
+    applyNotesHeight();
+    fitTextCard();
+  });
 
   // Notes edit
   let saveTimer = null;
