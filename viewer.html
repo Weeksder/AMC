@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#e8e8e8">
   <meta name="format-detection" content="telephone=no">
   <title>Notes Viewer</title>
-  <link rel="stylesheet" href="viewer.css?v=20260719h">
+  <link rel="stylesheet" href="viewer.css?v=20260912-textslides">
 </head>
 <body>
   <div class="empty-state" id="emptyState">
@@ -60,12 +60,13 @@
             <button type="button" id="btnResetNotes" title="Restore original notes">Reset</button>
           </div>
           <div class="view-toggles">
-            <button type="button" id="btnTogglePicture" title="Hide or show main slide">Picture</button>
-            <button type="button" id="btnToggleTools" title="Hide or show formatting tools">Tools</button>
-            <button type="button" id="btnSaveJson" title="Download PowerPoint with your speaker notes">SAVE</button>
-            <button type="button" id="btnOpen" title="Open a PowerPoint">Open</button>
-            <button type="button" id="btnViewerHelp" title="Help" aria-label="Help">?</button>
-            <button type="button" id="btnHome" title="Home page">Home</button>
+            <button type="button" id="btnViewMode" title="View mode — hide tools and lock notes (no accidental edits)" aria-pressed="false">View mode</button>
+            <button type="button" id="btnTogglePicture" class="view-hide" title="Hide or show main slide">Picture</button>
+            <button type="button" id="btnToggleTools" class="view-hide" title="Hide or show formatting tools">Tools</button>
+            <button type="button" id="btnSaveJson" class="view-hide" title="Download PowerPoint with your speaker notes">SAVE</button>
+            <button type="button" id="btnOpen" class="view-hide" title="Open a PowerPoint">Open</button>
+            <button type="button" id="btnViewerHelp" class="view-hide" title="Help" aria-label="Help">?</button>
+            <button type="button" id="btnHome" class="view-hide" title="Home page">Home</button>
             <input type="file" id="openFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/octet-stream" hidden>
           </div>
           <div class="nav">
@@ -81,7 +82,7 @@
   </div>
 
   <script src="jszip.min.js?v=20260719h"></script>
-  <script src="pptx-loader.js?v=20260719h"></script>
-  <script src="viewer.js?v=20260719h"></script>
+  <script src="pptx-loader.js?v=20260912-textslides"></script>
+  <script src="viewer.js?v=20260912-textslides"></script>
 </body>
 </html>

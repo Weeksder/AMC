@@ -279,6 +279,128 @@
     });
   }
 
+  function placeholderChromeType(el) {
+    var n = el;
+    while (n && n.nodeType === 1) {
+      if (n.localName === "sp" || n.localName === "cxnSp" || n.localName === "pic") {
+        var nodes = n.getElementsByTagName("*");
+        for (var i = 0; i < nodes.length; i++) {
+          if (nodes[i].localName === "ph") {
+            return String(nodes[i].getAttribute("type") || "").toLowerCase();
+          }
+        }
+        return "";
+      }
+      n = n.parentNode;
+    }
+    return "";
+  }
+
+  function slideDocToTextLines(slideDoc) {
+    var lines = [];
+    xmlLocalAll(slideDoc, "p").forEach(function (p) {
+      var chrome = placeholderChromeType(p);
+      if (chrome === "ftr" || chrome === "sldnum" || chrome === "dt" || chrome === "hdr") {
+        return;
+      }
+      var chunks = [];
+      Array.prototype.forEach.call(p.childNodes, function (ch) {
+        if (ch.nodeType !== 1) return;
+        if (ch.localName === "br") {
+          chunks.push("\n");
+          return;
+        }
+        if (ch.localName === "r" || ch.localName === "fld") {
+          xmlLocalAll(ch, "t").forEach(function (tEl) {
+            chunks.push(tEl.textContent || "");
+          });
+        }
+      });
+      if (!chunks.length) {
+        xmlLocalAll(p, "t").forEach(function (tEl) {
+          chunks.push(tEl.textContent || "");
+        });
+      }
+      String(chunks.join(""))
+        .split("\n")
+        .forEach(function (line) {
+          var t = String(line).replace(/\s+/g, " ").trim();
+          if (t) lines.push(t);
+        });
+    });
+    return lines;
+  }
+
+  function wrapSlideTextLines(lines, maxChars) {
+    var out = [];
+    (lines || []).forEach(function (line) {
+      line = String(line || "");
+      if (line.length <= maxChars) {
+        out.push(line);
+        return;
+      }
+      var words = line.split(/\s+/);
+      var cur = "";
+      words.forEach(function (w) {
+        var next = cur ? cur + " " + w : w;
+        if (next.length > maxChars && cur) {
+          out.push(cur);
+          cur = w;
+        } else {
+          cur = next;
+        }
+      });
+      if (cur) out.push(cur);
+    });
+    return out;
+  }
+
+  function buildTextSlideDataUrl(lines, slideNum) {
+    var w = 960;
+    var h = 540;
+    var raw = (lines && lines.length ? lines.slice() : []).filter(Boolean);
+    var nHint = raw.length || 1;
+    var fontSize = nHint <= 1 ? 64 : nHint <= 4 ? 40 : nHint <= 8 ? 28 : 22;
+    var maxChars = Math.max(12, Math.floor(w / (fontSize * 0.58)));
+    var texts = wrapSlideTextLines(raw, maxChars);
+    if (!texts.length) texts = [""];
+    if (texts.length > 16) {
+      fontSize = 18;
+      texts = texts.slice(0, 16);
+    }
+    var lineHeight = fontSize * 1.35;
+    var blockH = texts.length * lineHeight;
+    var startY = Math.max(fontSize + 36, (h - blockH) / 2 + fontSize * 0.85);
+    var tspans = texts
+      .map(function (line, i) {
+        var y = startY + i * lineHeight;
+        return (
+          '<text x="50%" y="' +
+          y +
+          '" text-anchor="middle" fill="#111111" font-size="' +
+          fontSize +
+          '" font-family="Calibri,Segoe UI,Arial,sans-serif" font-weight="600">' +
+          escapeHtmlText(line) +
+          "</text>"
+        );
+      })
+      .join("");
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' +
+      w +
+      '" height="' +
+      h +
+      '" viewBox="0 0 ' +
+      w +
+      " " +
+      h +
+      '">' +
+      '<rect width="100%" height="100%" fill="#ffffff"/>' +
+      tspans +
+      "</svg>";
+    return "data:image/svg+xml," + encodeURIComponent(svg);
+  }
+
   function safeDeckKey(name) {
     return (
       String(name || "deck")
@@ -369,15 +491,7 @@
         break;
       }
       if (!imgDataUrl) {
-        imgDataUrl =
-          "data:image/svg+xml," +
-          encodeURIComponent(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540">' +
-              '<rect width="100%" height="100%" fill="#e0e0e0"/>' +
-              '<text x="50%" y="50%" text-anchor="middle" fill="#666" font-size="22" font-family="-apple-system,sans-serif">Slide ' +
-              (i + 1) +
-              "</text></svg>"
-          );
+        imgDataUrl = buildTextSlideDataUrl(slideDocToTextLines(slideDoc), i + 1);
       }
 
       var notesHtml = "";

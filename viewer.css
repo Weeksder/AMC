@@ -357,6 +357,41 @@ html, body {
 .app.hide-tools .tools-extra { display: none !important; }
 .app.hide-tools .notes-bar { padding: 4px 10px; }
 
+.app.view-mode .view-hide,
+.app.view-mode .tools-extra,
+.app.view-mode .notes-bar .left {
+  display: none !important;
+}
+.app.view-mode .notes-bar { padding: 4px 10px; }
+.app.view-mode .notes-body {
+  caret-color: transparent;
+  cursor: default;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-user-modify: read-only;
+}
+.app.view-mode .notes-body:focus {
+  box-shadow: none;
+}
+.app.view-mode .splitter,
+.app.view-mode .v-splitter {
+  pointer-events: none;
+  cursor: default;
+  touch-action: none;
+  background: #e4e4e4;
+}
+.app.view-mode .splitter:hover,
+.app.view-mode .v-splitter:hover {
+  background: #e4e4e4;
+}
+.app.view-mode .splitter::after {
+  display: none;
+}
+.notes-bar #btnViewMode {
+  min-width: 5.6em;
+  font-weight: 600;
+}
+
 .empty-state {
   display: none;
   position: fixed;

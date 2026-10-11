@@ -72,6 +72,7 @@ Upload **all** of these files to GitHub Pages (including **`blank-target.pptx`**
 
 ### Notes Viewer
 - Open `.pptx`, thumbs + notes, SAVE as `.pptx`
+- View mode: hide toolbar tools and lock notes (read-only, iPad-safe)
 - Hide picture / tools, AMC Online Class link
 
 ### AMC Productivity Studio (below on home, or `amc-studio.html`)

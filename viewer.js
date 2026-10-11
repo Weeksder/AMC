@@ -37,6 +37,7 @@
   const btnFontUp = document.getElementById("btnFontUp");
   const btnTogglePicture = document.getElementById("btnTogglePicture");
   const btnToggleTools = document.getElementById("btnToggleTools");
+  const btnViewMode = document.getElementById("btnViewMode");
   const btnHome = document.getElementById("btnHome");
   const btnSaveJson = document.getElementById("btnSaveJson");
   const btnResetNotes = document.getElementById("btnResetNotes");
@@ -60,7 +61,12 @@
     }
   }
 
+  function isViewMode() {
+    return !!(appEl && appEl.classList.contains("view-mode"));
+  }
+
   function saveCurrentNotes() {
+    if (isViewMode()) return;
     if (!SLIDES.length || index < 0 || index >= SLIDES.length) return;
     try {
       // Only write editor HTML when the user actually edited this slide.
@@ -91,6 +97,9 @@
   }
 
   function emptyNotesHtml() {
+    if (isViewMode()) {
+      return '<p class="empty-notes">No notes for this slide.</p>';
+    }
     return '<p class="empty-notes">No notes for this slide. Click here to type.</p>';
   }
 
@@ -231,6 +240,10 @@
 
   let vDragging = false;
   vSplitter.addEventListener("pointerdown", function (e) {
+    if (isViewMode()) {
+      e.preventDefault();
+      return;
+    }
     vDragging = true;
     vSplitter.classList.add("dragging");
     vSplitter.setPointerCapture(e.pointerId);
@@ -270,7 +283,7 @@
     if (notesBody.contains(e.target)) return;
     const dy = e.deltaY;
     const dx = e.deltaX;
-    if (Math.abs(dx) > Math.abs(dy) || e.shiftKey) {
+    if (!isViewMode() && (Math.abs(dx) > Math.abs(dy) || e.shiftKey)) {
       e.preventDefault();
       const delta = e.shiftKey ? dy : dx;
       applySidebarWidth(sidebarW + (delta > 0 ? 12 : -12));
@@ -295,6 +308,11 @@
   document.addEventListener("keydown", function (e) {
     const inNotes = notesBody === document.activeElement || notesBody.contains(document.activeElement);
     if (e.key === "Escape") {
+      if (isViewMode()) {
+        e.preventDefault();
+        setViewMode(false);
+        return;
+      }
       if (appEl.classList.contains("hide-picture") || appEl.classList.contains("hide-tools")) {
         e.preventDefault();
         setHidePicture(false);
@@ -302,7 +320,7 @@
       }
       return;
     }
-    if (inNotes) return;
+    if (inNotes && !isViewMode()) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") {
       e.preventDefault();
       nextSlide(-1);
@@ -321,6 +339,10 @@
   // Notes height splitter
   let dragging = false;
   splitter.addEventListener("pointerdown", function (e) {
+    if (isViewMode()) {
+      e.preventDefault();
+      return;
+    }
     dragging = true;
     splitter.classList.add("dragging");
     splitter.setPointerCapture(e.pointerId);
@@ -350,11 +372,17 @@
   // Notes edit
   let saveTimer = null;
   notesBody.addEventListener("input", function () {
+    if (isViewMode()) return;
     if (SLIDES[index]) SLIDES[index].notesDirty = true;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveCurrentNotes, 250);
   });
+  notesBody.addEventListener("beforeinput", function (e) {
+    if (!isViewMode()) return;
+    e.preventDefault();
+  });
   notesBody.addEventListener("focus", function () {
+    if (isViewMode()) return;
     const empty = notesBody.querySelector("p.empty-notes");
     if (empty && notesBody.innerText.trim() === empty.innerText.trim()) {
       notesBody.innerHTML = "<p><br></p>";
@@ -364,6 +392,7 @@
   // Paste from ChatGPT / Docs / Slides → simple one-line-per-<p> HTML (keep bold)
   notesBody.addEventListener("paste", function (e) {
     e.preventDefault();
+    if (isViewMode()) return;
     if (SLIDES[index]) SLIDES[index].notesDirty = true;
     var html = "";
     var plain = "";
@@ -412,6 +441,13 @@
 
   // Enter → new paragraph (not Chrome's default <div>, which looks Google-like)
   notesBody.addEventListener("keydown", function (e) {
+    if (isViewMode()) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key.length === 1 || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+      }
+      return;
+    }
     if (e.key !== "Enter" || e.shiftKey) return;
     // Let list commands use default behavior
     try {
@@ -428,6 +464,7 @@
   });
 
   document.getElementById("fmtBar").addEventListener("click", function (e) {
+    if (isViewMode()) return;
     const btn = e.target.closest("button[data-cmd]");
     if (!btn) return;
     e.preventDefault();
@@ -442,6 +479,7 @@
   if (btnSplitLine) {
     btnSplitLine.addEventListener("click", function (e) {
       e.preventDefault();
+      if (isViewMode()) return;
       notesBody.focus();
       if (SLIDES[index]) SLIDES[index].notesDirty = true;
       // Clear empty placeholder first
@@ -463,6 +501,7 @@
   }
 
   btnResetNotes.addEventListener("click", function () {
+    if (isViewMode()) return;
     if (!confirm("Reset notes for this slide to the original from the PowerPoint?")) return;
     try {
       localStorage.removeItem(storageKey(index));
@@ -551,6 +590,37 @@
     setHideTools(!appEl.classList.contains("hide-tools"));
   });
 
+  const VIEW_MODE_PREF_KEY = "pptxNotesViewer:viewMode";
+  function setViewMode(on) {
+    on = !!on;
+    appEl.classList.toggle("view-mode", on);
+    if (btnViewMode) {
+      btnViewMode.classList.toggle("on", on);
+      btnViewMode.setAttribute("aria-pressed", on ? "true" : "false");
+      btnViewMode.title = on
+        ? "Exit View mode — show tools and allow editing notes"
+        : "View mode — hide tools and lock notes (no accidental edits)";
+    }
+    if (notesBody) {
+      notesBody.setAttribute("contenteditable", on ? "false" : "true");
+      notesBody.setAttribute("aria-readonly", on ? "true" : "false");
+      notesBody.spellcheck = !on;
+      if (on) notesBody.setAttribute("inputmode", "none");
+      else notesBody.removeAttribute("inputmode");
+      if (on) notesBody.blur();
+      var empty = notesBody.querySelector("p.empty-notes");
+      if (empty) notesBody.innerHTML = emptyNotesHtml();
+    }
+    try {
+      localStorage.setItem(VIEW_MODE_PREF_KEY, on ? "1" : "0");
+    } catch (e) {}
+  }
+  if (btnViewMode) {
+    btnViewMode.addEventListener("click", function () {
+      setViewMode(!isViewMode());
+    });
+  }
+
   var btnViewerHelp = document.getElementById("btnViewerHelp");
   if (btnViewerHelp) {
     btnViewerHelp.addEventListener("click", function () {
@@ -558,6 +628,7 @@
         "Notes Viewer help\n\n" +
           "• Browse slides in the left thumbnails or use ◀ ▶ / arrow keys.\n" +
           "• Type speaker notes in the bottom pane. Use B / I / U and lists to format.\n" +
+          "• View mode hides every toolbar tool and locks notes so you can read on iPad without accidental edits. Tap it again to exit.\n" +
           "• A− / A+ change notes text size in the viewer only (not saved to the file).\n" +
           "• Hide picture / Hide tools toggle the layout.\n" +
           "• SAVE downloads a .pptx with your notes written into the file.\n" +
@@ -688,9 +759,11 @@
     try {
       setHidePicture(false);
       setHideTools(localStorage.getItem(STORAGE_PREFIX + "hideTools") === "1");
+      setViewMode(localStorage.getItem(VIEW_MODE_PREF_KEY) === "1");
     } catch (e) {
       setHidePicture(false);
       setHideTools(false);
+      setViewMode(false);
     }
   }
 
